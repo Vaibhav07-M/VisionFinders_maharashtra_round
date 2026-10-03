@@ -1,0 +1,154 @@
+import { Request, Response } from 'express';
+import { db, sha256Sync } from '../db/firestore';
+import { AuthenticatedRequest } from './auth';
+import { ipLimiter, accountLimiter, deviceLimiter, activeBlocklist, verifyPoW, computeRiskScore } from './abuse';
+import { DropEntry, Drop } from '../../shared/types';
+import { appendAuditRecord } from './audit';
+
+export async function joinDropHandler(req: AuthenticatedRequest, res: Response) {
+  const { id: dropId } = req.params;
+  const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
+  const clientDeviceId = (req.headers['x-device-id'] as string) || 'device_default';
+  const userUid = req.user?.uid || 'user_guest';
+
+  // 1. CHEAPEST FIRST: Blocklist check
+  if (activeBlocklist.has(ip)) {
+    return res.status(403).json({
+      error: 'IP_BLOCKED',
+      message: 'Access denied: IP is present on security blocklist.',
+    });
+  }
+
+  // 2. RATE LIMIT CHECKS (IP, Account, Device)
+  try {
+    await ipLimiter.consume(ip);
+    await accountLimiter.consume(userUid);
+    await deviceLimiter.consume(clientDeviceId);
+  } catch (rateLimitRejection) {
+    return res.status(429).json({
+      error: 'RATE_LIMITED',
+      message: 'Too many requests. Request rate exceeds safe threshold.',
+      retryAfterSeconds: 15,
+    });
+  }
+
+  // 3. DROP STATUS & WINDOW VALIDATION
+  const dropDoc = db.get('drops', dropId);
+  if (!dropDoc) {
+    return res.status(404).json({ error: 'DROP_NOT_FOUND', message: 'Drop event does not exist.' });
+  }
+  const drop = dropDoc.data as Drop;
+  if (drop.status !== 'open') {
+    return res.status(400).json({ error: 'DROP_NOT_OPEN', message: `Drop registration is currently ${drop.status}.` });
+  }
+
+  // 4. HONEYPOT TRAP CHECK
+  const honeypotVal = req.body.website_trap || '';
+  if (honeypotVal.length > 0) {
+    appendAuditRecord('HONEYPOT_TRIGGERED', userUid, { ip, dropId });
+    return res.status(403).json({ error: 'BOT_DETECTED', message: 'Automated agent honeypot triggered.' });
+  }
+
+  // 5. PROOF-OF-WORK VERIFICATION
+  const { nonce, idempotencyKey } = req.body;
+  const challenge = `${dropId}:${userUid}:${idempotencyKey}`;
+  const powValid = verifyPoW(challenge, Number(nonce || 0), drop.defenceConfig.powDifficulty || 4);
+
+  if (drop.defenceConfig.powEnabled && !powValid) {
+    return res.status(400).json({
+      error: 'INVALID_POW',
+      message: 'Cryptographic proof-of-work challenge failed or incomplete.',
+    });
+  }
+
+  // 6. TIMING SIGNALS & RISK SCORING
+  const { score: riskScore, signals } = computeRiskScore(req, powValid);
+  if (drop.defenceConfig.riskScoringEnabled && riskScore >= drop.defenceConfig.minRiskBlockScore) {
+    return res.status(403).json({
+      error: 'RISK_SCORE_EXCEEDED',
+      message: 'Entry blocked by automated behavioral risk evaluation.',
+      riskScore,
+      signals,
+    });
+  }
+
+  // 7. IDEMPOTENCY CHECK (Section 1 & 4 requirement)
+  // If user or idempotency key already entered, return the SAME receipt
+  const existingReceiptDoc = db.get('idempotency', idempotencyKey);
+  if (existingReceiptDoc) {
+    return res.json({
+      isDuplicate: true,
+      entry: existingReceiptDoc.data,
+      message: 'Idempotent response: Returning existing valid entry receipt.',
+    });
+  }
+
+  // 8. IDENTITY UNIQUENESS (1 Phone/Identity = 1 Entry)
+  const phone = req.user?.email || userUid;
+  const identityKey = sha256Sync(phone);
+
+  const existingEntry = db.get(`drops/${dropId}/entries`, identityKey);
+  if (existingEntry) {
+    return res.json({
+      isDuplicate: true,
+      entry: existingEntry.data,
+      message: 'One identity = one entry. Returning existing registered receipt.',
+    });
+  }
+
+  // 9. CREATE ENTRY DOCUMENT (Doc ID = identityKey enforces atomic uniqueness)
+  const receiptId = `RCP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const now = new Date().toISOString();
+
+  const newEntry: DropEntry = {
+    receiptId,
+    dropId,
+    uid: userUid,
+    identityKey,
+    idempotencyKey,
+    arrivedAt: now,
+    serverTimestamp: Date.now(),
+    riskScore,
+    status: riskScore >= drop.defenceConfig.minRiskChallengeScore ? 'flagged' : 'eligible',
+    isBot: req.body.isBot || false,
+    speedClass: req.body.speedClass || 'normal',
+  };
+
+  try {
+    // Atomic insert using identityKey as document ID
+    db.create(`drops/${dropId}/entries`, identityKey, newEntry);
+    db.set('idempotency', idempotencyKey, newEntry);
+
+    // Update drop counter
+    db.set('drops', dropId, {
+      totalEntriesCount: (drop.totalEntriesCount || 0) + 1,
+      stats: {
+        ...drop.stats,
+        eligible: (drop.stats?.eligible || 0) + (newEntry.status === 'eligible' ? 1 : 0),
+        flagged: (drop.stats?.flagged || 0) + (newEntry.status === 'flagged' ? 1 : 0),
+      },
+    });
+
+    appendAuditRecord('ENTRY_RECORDED', userUid, {
+      receiptId,
+      dropId,
+      identityKey,
+      riskScore,
+    });
+
+    return res.status(201).json({
+      isDuplicate: false,
+      entry: newEntry,
+    });
+  } catch (err: any) {
+    if (err.code === 6) {
+      // Document already exists (race condition handled cleanly)
+      const existing = db.get(`drops/${dropId}/entries`, identityKey);
+      return res.json({
+        isDuplicate: true,
+        entry: existing?.data,
+      });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+}

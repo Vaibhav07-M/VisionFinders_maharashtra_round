@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Public Drops: Read-only for authenticated and public visitors
+    match /drops/{dropId} {
+      allow read: if true;
+      allow write: if false; // All writes MUST go through Express API via Admin SDK
+      
+      match /seats/{seatId} {
+        allow read: if true;
+        allow write: if false;
+      }
+      
+      match /entries/{identityKey} {
+        allow read: if request.auth != null && request.auth.uid == resource.data.uid;
+        allow write: if false;
+      }
+      
+      match /drawResults/{rank} {
+        allow read: if true;
+        allow write: if false;
+      }
+      
+      match /reservations/{resId} {
+        allow read: if request.auth != null && request.auth.uid == resource.data.uid;
+        allow write: if false;
+      }
+    }
+    
+    // User Identities: Strict Privacy & Deny All Direct Client Writes
+    match /identities/{identityKey} {
+      allow read, write: if false; // Admin SDK only
+    }
+    
+    // Sessions: Admin SDK only
+    match /sessions/{sessionId} {
+      allow read, write: if false;
+    }
+    
+    // Orders & Tickets
+    match /tickets/{ticketId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow write: if false;
+    }
+    
+    // Audit Log: Read-only for transparency, strictly append-only via Admin SDK
+    match /auditLog/{logId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    
+    // Default Deny All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
