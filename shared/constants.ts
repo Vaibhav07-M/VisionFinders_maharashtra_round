@@ -82,6 +82,14 @@ export const BOT_PROFILES_INFO: Record<BotProfileType, {
   },
 };
 
+export const DEFAULT_TIERS: import('./types').TicketTier[] = [
+  { id: 'vip', name: 'VIP', price: 5000, seatCount: 20, description: 'Front-row vantage, dedicated lounge, and priority check-in.' },
+  { id: 'platinum', name: 'Platinum', price: 3500, seatCount: 60, description: 'Prime center orchestra viewing with premium acoustics.' },
+  { id: 'gold', name: 'Gold', price: 2500, seatCount: 100, description: 'Elevated mezzanine seating with unobstructed clear line of sight.' },
+  { id: 'silver', name: 'Silver', price: 1500, seatCount: 150, description: 'Great acoustics across middle tiers with direct stage views.' },
+  { id: 'bronze', name: 'Bronze', price: 800, seatCount: 170, description: 'Accessible admission seating with full venue immersion.' },
+];
+
 export const INITIAL_SAMPLE_DROPS: Drop[] = [
   {
     id: 'drop-jack-white-vault',
@@ -91,15 +99,17 @@ export const INITIAL_SAMPLE_DROPS: Drop[] = [
     city: 'Nashville, TN',
     heroImage: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=1600&q=80',
     seatCount: 500,
-    price: 85,
-    currency: 'USD',
+    price: 2500,
+    currency: 'Rs',
     perPersonLimit: 1,
     windowStart: new Date(Date.now() - 1000 * 60 * 2).toISOString(), // currently open
-    windowEnd: new Date(Date.now() + 1000 * 60 * 18).toISOString(),
-    drawTime: new Date(Date.now() + 1000 * 60 * 20).toISOString(),
+    windowEnd: new Date(Date.now() + 1000 * 60 * 90).toISOString(),
+    drawTime: new Date(Date.now() + 1000 * 60 * 95).toISOString(),
     holdDurationSec: 300,
     mode: 'FAIR_DROP',
     status: 'open',
+    tiers: DEFAULT_TIERS,
+    round: 1,
     seedCommitHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
     revealedSeed: null,
     defenceConfig: DEFAULT_DEFENCE_CONFIG,

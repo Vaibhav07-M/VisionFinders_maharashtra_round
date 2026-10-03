@@ -1,291 +1,577 @@
-import React, { useState, useEffect } from 'react';
-import { useApp } from '@/context/AppContext';
-import { Card, CardTitle } from '@/components/ui/Card';
+import React, { useState, useEffect, useCallback } from 'react';
+import { PageHeader } from '@/components/admin/PageHeader';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
+import { SkeletonLoader } from '@/components/admin/SkeletonLoader';
+import { ErrorState } from '@/components/admin/ErrorState';
 import { Button } from '@/components/ui/Button';
-import { ShieldAlert, Trash2, Loader2, AlertCircle, Save } from 'lucide-react';
-import { api } from '@/utils/api';
-import { SecurityConfig } from '../../../server/modules/abuse';
+import { Badge } from '@/components/ui/Badge';
+import {
+  ShieldCheck,
+  ShieldAlert,
+  Sliders,
+  Cpu,
+  Zap,
+  Globe,
+  Plus,
+  Trash2,
+  Upload,
+  Search,
+  Clock,
+  UserCheck,
+  Activity,
+  AlertTriangle,
+} from 'lucide-react';
+import { useApp } from '@/context/AppContext';
+import { getAdminHeaders } from '@/utils/api';
 
 export const SecurityRulesPage: React.FC = () => {
   const { addToast } = useApp();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+
+  // Rules form state
+  const [turnstileEnabled, setTurnstileEnabled] = useState<boolean>(true);
+  const [powEnabled, setPowEnabled] = useState<boolean>(true);
+  const [powDifficulty, setPowDifficulty] = useState<number>(2);
+  const [honeypotEnabled, setHoneypotEnabled] = useState<boolean>(true);
+  const [ipWindowSec, setIpWindowSec] = useState<number>(1);
+  const [ipMaxRequests, setIpMaxRequests] = useState<number>(20);
+  const [accountWindowSec, setAccountWindowSec] = useState<number>(60);
+  const [accountMaxRequests, setAccountMaxRequests] = useState<number>(60);
+  const [deviceWindowSec, setDeviceWindowSec] = useState<number>(60);
+  const [deviceMaxRequests, setDeviceMaxRequests] = useState<number>(60);
+  const [minRiskBlockScore, setMinRiskBlockScore] = useState<number>(80);
+  const [minRiskChallengeScore, setMinRiskChallengeScore] = useState<number>(50);
+
+  // Metadata
+  const [lastChangedBy, setLastChangedBy] = useState<string>('system');
+  const [lastChangedAt, setLastChangedAt] = useState<string>('');
+  const [ruleHits, setRuleHits] = useState<any>({
+    ipLimitBlocked: 0,
+    blocklistCount: 0,
+    activeLimiterPoints: 20,
+    activeLimiterDuration: 1,
+  });
+
+  // Blocklist state
+  const [blocklist, setBlocklist] = useState<string[]>([]);
+  const [blocklistSearch, setBlocklistSearch] = useState<string>('');
+  const [newIdentity, setNewIdentity] = useState<string>('');
+  const [importText, setImportText] = useState<string>('');
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
+
+  // Loading & Action dialogs
+  const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [rateLimitIp, setRateLimitIp] = useState(20);
-  const [rateLimitAccount, setRateLimitAccount] = useState(60);
-  const [rateLimitDevice, setRateLimitDevice] = useState(60);
-  const [powDifficulty, setPowDifficulty] = useState(2);
-  const [turnstileActive, setTurnstileActive] = useState(true);
-  const [honeypotActive, setHoneypotActive] = useState(true);
-  const [blocklist, setBlocklist] = useState<string[]>([]);
-  const [newBlockedIp, setNewBlockedIp] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    action: 'save' | 'clearBlocklist' | 'removeBlock' | null;
+    targetItem?: string;
+  }>({
+    isOpen: false,
+    action: null,
+  });
 
-  // Fetch security rules from Firestore
-  useEffect(() => {
-    let mounted = true;
-    const fetchRules = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await api.security.getRules();
-        if (mounted && res.config) {
-          setRateLimitIp(res.config.ipMaxRequests || 20);
-          setRateLimitAccount(res.config.accountMaxRequests || 60);
-          setRateLimitDevice(res.config.deviceMaxRequests || 60);
-          setPowDifficulty(res.config.powDifficulty || 2);
-          setTurnstileActive(res.config.turnstileEnabled !== false);
-          setHoneypotActive(res.config.honeypotEnabled !== false);
-          setBlocklist(res.config.blocklist || []);
-        }
-      } catch (err: any) {
-        if (mounted) setError(err.message || 'Failed to load security rules.');
-      } finally {
-        if (mounted) setLoading(false);
+  const fetchSecurity = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/security', {
+        headers: getAdminHeaders(),
+      });
+      if (!res.ok) throw new Error('Failed to load security configurations');
+      const data = await res.json();
+
+      const cfg = data.config;
+      if (cfg) {
+        setTurnstileEnabled(cfg.turnstileEnabled ?? true);
+        setPowEnabled(cfg.powEnabled ?? true);
+        setPowDifficulty(cfg.powDifficulty ?? 2);
+        setHoneypotEnabled(cfg.honeypotEnabled ?? true);
+        setIpWindowSec(cfg.ipWindowSec ?? 1);
+        setIpMaxRequests(cfg.ipMaxRequests ?? 20);
+        setAccountWindowSec(cfg.accountWindowSec ?? 60);
+        setAccountMaxRequests(cfg.accountMaxRequests ?? 60);
+        setDeviceWindowSec(cfg.deviceWindowSec ?? 60);
+        setDeviceMaxRequests(cfg.deviceMaxRequests ?? 60);
+        setMinRiskBlockScore(cfg.minRiskBlockScore ?? 80);
+        setMinRiskChallengeScore(cfg.minRiskChallengeScore ?? 50);
       }
-    };
-    fetchRules();
-    return () => {
-      mounted = false;
-    };
+
+      setBlocklist(data.blocklist || []);
+      setRuleHits(data.ruleHits || {});
+      setLastChangedBy(data.lastChangedBy || 'system');
+      setLastChangedAt(data.lastChangedAt || '');
+    } catch (err: any) {
+      setError(err.message || 'Error communicating with security module');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const handleAddBlockedIp = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newBlockedIp.trim()) return;
-    const ip = newBlockedIp.trim();
-    if (!blocklist.includes(ip)) {
-      setBlocklist(prev => [...prev, ip]);
-    }
-    setNewBlockedIp('');
-    addToast('success', 'IP Blocked', `Added ${ip} to active blocklist.`);
-  };
+  useEffect(() => {
+    fetchSecurity();
+  }, [fetchSecurity]);
 
-  const handleRemoveBlockedIp = (ip: string) => {
-    setBlocklist(prev => prev.filter(item => item !== ip));
-    addToast('info', 'Block Removed', `Removed ${ip} from blocklist.`);
-  };
-
+  // Save rules
   const handleSaveRules = async () => {
+    setSaving(true);
     try {
-      setSaving(true);
-      const updates: Partial<SecurityConfig> = {
-        ipMaxRequests: rateLimitIp,
-        accountMaxRequests: rateLimitAccount,
-        deviceMaxRequests: rateLimitDevice,
+      const payload = {
+        turnstileEnabled,
+        powEnabled,
         powDifficulty,
-        turnstileEnabled: turnstileActive,
-        honeypotEnabled: honeypotActive,
-        blocklist,
+        honeypotEnabled,
+        ipWindowSec,
+        ipMaxRequests,
+        accountWindowSec,
+        accountMaxRequests,
+        deviceWindowSec,
+        deviceMaxRequests,
+        minRiskBlockScore,
+        minRiskChallengeScore,
       };
-      const res = await api.security.updateRules(updates);
-      addToast(
-        'success',
-        'Security Rules Deployed',
-        'Policy committed to Firestore (securityConfig/global) & live rate limiters reconfigured.'
-      );
+
+      const res = await fetch('/api/admin/security', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to update security rules');
+      }
+
+      addToast('success', 'Security Updated', 'Rate limits and defense parameters updated live in memory.');
+      fetchSecurity();
     } catch (err: any) {
-      addToast('error', 'Deploy Failed', err.message);
+      addToast('error', 'Update Failed', err.message);
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="py-24 flex flex-col items-center justify-center space-y-3">
-        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
-        <p className="text-xs font-mono text-slate-400">Loading security rules from Firestore...</p>
-      </div>
-    );
-  }
+  // Blocklist mutation
+  const handleBlocklistAction = async (action: 'add' | 'remove' | 'import' | 'clear', reason: string, item?: string, items?: string[]) => {
+    try {
+      const res = await fetch('/api/admin/security/blocklist', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ action, reason, item, items }),
+      });
 
-  if (error) {
-    return (
-      <div className="max-w-2xl mx-auto py-24 px-4">
-        <Card variant="default" className="border-rose-500/30 p-8 text-center space-y-4">
-          <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
-          <h2 className="text-lg font-stamp uppercase text-white font-bold">Failed to load security rules</h2>
-          <p className="text-xs text-slate-400 font-mono">{error}</p>
-          <Button onClick={() => window.location.reload()} size="sm" variant="primary">
-            Retry
-          </Button>
-        </Card>
-      </div>
-    );
-  }
+      if (!res.ok) throw new Error('Failed to update blocklist');
+      const data = await res.json();
+      setBlocklist(data.blocklist || []);
+      addToast('success', 'Blocklist Updated', `Applied action [${action.toUpperCase()}] with audit log.`);
+      setNewIdentity('');
+      setShowImportModal(false);
+      setImportText('');
+    } catch (err: any) {
+      addToast('error', 'Blocklist Error', err.message);
+    }
+  };
+
+  const filteredBlocklist = blocklist.filter(item =>
+    item.toLowerCase().includes(blocklistSearch.toLowerCase())
+  );
 
   return (
-    <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-8 pb-20">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-            <span>Panel B · Organizer & Security</span>
-            <span>/</span>
-            <span>B5. Security & Rate Limiting</span>
+    <div className="space-y-6">
+      <PageHeader
+        title="Security Defense & Rate Limiting"
+        subtitle="Dynamic tuning of multi-layer defenses, active memory limiters, and live IP/Account blocklists."
+        badgeText={`Live Hit Rate: ${ruleHits.ipLimitBlocked} 429s/min`}
+        badgeVariant="warning"
+        action={
+          <div className="flex items-center gap-3">
+            <div className="text-right hidden sm:block">
+              <span className="text-[11px] text-slate-400 font-mono block">
+                Last modified by: <strong className="text-slate-200">{lastChangedBy}</strong>
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono block">
+                {lastChangedAt ? new Date(lastChangedAt).toLocaleString() : 'N/A'}
+              </span>
+            </div>
+            <Button
+              variant="primary"
+              onClick={handleSaveRules}
+              isLoading={saving}
+              className="gap-2"
+            >
+              <ShieldCheck className="w-4 h-4" /> Save Rules
+            </Button>
           </div>
-          <h1 className="text-3xl font-stamp font-black text-white uppercase tracking-tight mt-1">
-            Abuse Defence & Threshold Config
-          </h1>
+        }
+      />
+
+      {/* Live Counter Strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="p-4 bg-surface-100 border border-white/5 rounded-xl flex items-center justify-between">
+          <div>
+            <span className="text-xs text-slate-400 font-mono block">Active IP Points</span>
+            <span className="text-xl font-mono font-bold text-white">
+              {ruleHits.activeLimiterPoints} req / {ruleHits.activeLimiterDuration}s
+            </span>
+          </div>
+          <Zap className="w-6 h-6 text-brand-yellow/80" />
         </div>
 
-        <Button size="md" variant="primary" onClick={handleSaveRules} disabled={saving} leftIcon={<Save className="w-4 h-4" />}>
-          {saving ? 'Deploying...' : 'Save & Deploy Security Rules'}
-        </Button>
+        <div className="p-4 bg-surface-100 border border-white/5 rounded-xl flex items-center justify-between">
+          <div>
+            <span className="text-xs text-slate-400 font-mono block">429 Blocks (60s)</span>
+            <span className="text-xl font-mono font-bold text-rose-400">
+              {ruleHits.ipLimitBlocked} intercepted
+            </span>
+          </div>
+          <ShieldAlert className="w-6 h-6 text-rose-400/80" />
+        </div>
+
+        <div className="p-4 bg-surface-100 border border-white/5 rounded-xl flex items-center justify-between">
+          <div>
+            <span className="text-xs text-slate-400 font-mono block">Active Blocklist</span>
+            <span className="text-xl font-mono font-bold text-amber-400">
+              {blocklist.length} identities
+            </span>
+          </div>
+          <Globe className="w-6 h-6 text-amber-400/80" />
+        </div>
+
+        <div className="p-4 bg-surface-100 border border-white/5 rounded-xl flex items-center justify-between">
+          <div>
+            <span className="text-xs text-slate-400 font-mono block">PoW Difficulty</span>
+            <span className="text-xl font-mono font-bold text-cyan-400">
+              {powDifficulty} Leading Zeros
+            </span>
+          </div>
+          <Cpu className="w-6 h-6 text-cyan-400/80" />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Sliders & Thresholds */}
-        <div className="lg:col-span-7 space-y-6">
-          <Card variant="glass" className="space-y-6">
-            <CardTitle className="text-lg">Rate Limiting Thresholds (Live sliding window)</CardTitle>
-            
-            <div className="space-y-5">
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs font-mono">
-                  <span className="text-slate-300">Max Requests / Sec per IP:</span>
-                  <span className="text-brand-yellow font-bold">{rateLimitIp} req/sec</span>
+      {loading ? (
+        <SkeletonLoader count={4} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={fetchSecurity} />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Main Defense Form */}
+          <div className="lg:col-span-7 space-y-6">
+            <div className="p-6 bg-surface-100 border border-white/5 rounded-2xl space-y-6">
+              <div className="flex items-center justify-between border-b border-white/5 pb-4">
+                <div className="flex items-center gap-2">
+                  <Sliders className="w-5 h-5 text-brand-yellow" />
+                  <h3 className="text-base font-bold text-white">Rate Limiters &amp; Burst Controls</h3>
                 </div>
-                <input
-                  type="range"
-                  min={5}
-                  max={50}
-                  value={rateLimitIp}
-                  onChange={e => setRateLimitIp(Number(e.target.value))}
-                  className="w-full accent-brand-yellow"
-                />
-                <span className="text-[11px] text-slate-500 block">Surpassing this triggers HTTP 429 with Retry-After header.</span>
+                <Badge variant="yellow">In-Memory Limiter</Badge>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs font-mono">
-                  <span className="text-slate-300">Max Requests / Min per Verified Account:</span>
-                  <span className="text-brand-yellow font-bold">{rateLimitAccount} req/min</span>
-                </div>
-                <input
-                  type="range"
-                  min={10}
-                  max={120}
-                  value={rateLimitAccount}
-                  onChange={e => setRateLimitAccount(Number(e.target.value))}
-                  className="w-full accent-brand-yellow"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs font-mono">
-                  <span className="text-slate-300">Max Requests / Min per Device Fingerprint:</span>
-                  <span className="text-brand-yellow font-bold">{rateLimitDevice} req/min</span>
-                </div>
-                <input
-                  type="range"
-                  min={10}
-                  max={120}
-                  value={rateLimitDevice}
-                  onChange={e => setRateLimitDevice(Number(e.target.value))}
-                  className="w-full accent-brand-yellow"
-                />
-              </div>
-            </div>
-          </Card>
-
-          {/* Proof of work & challenges */}
-          <Card variant="glass" className="space-y-6">
-            <CardTitle className="text-lg">Active Challenge Engine</CardTitle>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-surface-200">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <span className="text-xs font-bold text-white block">Cloudflare Turnstile Managed Challenge</span>
-                  <span className="text-[11px] text-slate-400">Enforces browser client execution without CAPTCHA friction.</span>
+                  <label className="text-xs font-mono text-slate-300 block mb-1.5">
+                    IP Rate Limit (Max Requests)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={ipMaxRequests}
+                    onChange={(e) => setIpMaxRequests(parseInt(e.target.value) || 20)}
+                    className="w-full bg-surface-200 border border-white/10 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-brand-yellow"
+                  />
+                  <span className="text-[11px] text-slate-500 font-mono mt-1 block">Window: {ipWindowSec} second</span>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={turnstileActive}
-                  onChange={e => setTurnstileActive(e.target.checked)}
-                  className="w-5 h-5 rounded text-brand-yellow"
-                />
-              </div>
 
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-surface-200">
                 <div>
-                  <span className="text-xs font-bold text-white block">Honeypot Form Trap</span>
-                  <span className="text-[11px] text-slate-400">Invisible CSS input that immediately blocks naive bot scrapers.</span>
+                  <label className="text-xs font-mono text-slate-300 block mb-1.5">
+                    Account Rate Limit (Max / Min)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={5000}
+                    value={accountMaxRequests}
+                    onChange={(e) => setAccountMaxRequests(parseInt(e.target.value) || 60)}
+                    className="w-full bg-surface-200 border border-white/10 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-brand-yellow"
+                  />
+                  <span className="text-[11px] text-slate-500 font-mono mt-1 block">Window: {accountWindowSec} seconds</span>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={honeypotActive}
-                  onChange={e => setHoneypotActive(e.target.checked)}
-                  className="w-5 h-5 rounded text-brand-yellow"
-                />
+
+                <div>
+                  <label className="text-xs font-mono text-slate-300 block mb-1.5">
+                    Device Fingerprint Limit (Max / Min)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={5000}
+                    value={deviceMaxRequests}
+                    onChange={(e) => setDeviceMaxRequests(parseInt(e.target.value) || 60)}
+                    className="w-full bg-surface-200 border border-white/10 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-brand-yellow"
+                  />
+                  <span className="text-[11px] text-slate-500 font-mono mt-1 block">Window: {deviceWindowSec} seconds</span>
+                </div>
+
+                <div>
+                  <label className="text-xs font-mono text-slate-300 block mb-1.5">
+                    Proof-of-Work Difficulty
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={6}
+                    value={powDifficulty}
+                    onChange={(e) => setPowDifficulty(parseInt(e.target.value) || 2)}
+                    className="w-full bg-surface-200 border border-white/10 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-brand-yellow"
+                  />
+                  <span className="text-[11px] text-slate-500 font-mono mt-1 block">Required leading zero nibbles (1-6)</span>
+                </div>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-surface-200 space-y-2">
-                <div className="flex justify-between text-xs font-mono">
-                  <span className="text-slate-300">Proof-of-Work Target Difficulty:</span>
-                  <span className="text-cyan-400 font-bold">{powDifficulty} Hex Zeros</span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={4}
-                  value={powDifficulty}
-                  onChange={e => setPowDifficulty(Number(e.target.value))}
-                  className="w-full accent-cyan-400"
-                />
-                <span className="text-[11px] text-slate-500 block">
-                  Difficulty {powDifficulty} requires client to solve cryptographic SHA-256 challenge before submit.
-                </span>
-              </div>
-            </div>
-          </Card>
-        </div>
+              {/* Toggles */}
+              <div className="pt-4 border-t border-white/5 space-y-4">
+                <h4 className="text-xs font-mono text-slate-400 uppercase tracking-wider">Active Challenge Gates</h4>
 
-        {/* Right Column: Blocklist */}
-        <div className="lg:col-span-5 space-y-6">
-          <Card variant="default" className="border-white/10 space-y-4">
-            <CardTitle className="text-base flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-rose-400" />
-              <span>IP & Subnet Blocklist</span>
-            </CardTitle>
-
-            <form onSubmit={handleAddBlockedIp} className="flex gap-2">
-              <input
-                type="text"
-                placeholder="198.51.100.42"
-                value={newBlockedIp}
-                onChange={e => setNewBlockedIp(e.target.value)}
-                className="flex-1 px-3 py-1.5 text-xs bg-surface-200 border border-white/10 rounded-lg text-white font-mono placeholder-slate-500 focus:outline-none focus:border-brand-yellow"
-              />
-              <Button type="submit" size="sm" variant="danger">
-                Block
-              </Button>
-            </form>
-
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {blocklist.length === 0 ? (
-                <p className="text-xs text-slate-500 italic p-2">No IPs currently blocked.</p>
-              ) : (
-                blocklist.map((ip, i) => (
-                  <div
-                    key={i}
-                    className="p-2.5 rounded-lg bg-surface-200 border border-white/5 flex items-center justify-between text-xs font-mono"
-                  >
-                    <span className="text-slate-300 truncate max-w-[200px]">{ip}</span>
-                    <button
-                      onClick={() => handleRemoveBlockedIp(ip)}
-                      className="text-slate-500 hover:text-rose-400 p-1"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl">
+                  <div>
+                    <span className="text-sm font-semibold text-white block">Turnstile / CAPTCHA Challenge</span>
+                    <span className="text-xs text-slate-400">Enforce browser token verification before queue entry</span>
                   </div>
-                ))
-              )}
+                  <input
+                    type="checkbox"
+                    checked={turnstileEnabled}
+                    onChange={(e) => setTurnstileEnabled(e.target.checked)}
+                    className="w-5 h-5 accent-brand-yellow cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl">
+                  <div>
+                    <span className="text-sm font-semibold text-white block">Proof of Work (PoW) Mining</span>
+                    <span className="text-xs text-slate-400">Forces client CPU to compute SHA-256 hash collision</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={powEnabled}
+                    onChange={(e) => setPowEnabled(e.target.checked)}
+                    className="w-5 h-5 accent-brand-yellow cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl">
+                  <div>
+                    <span className="text-sm font-semibold text-white block">Honeypot Trap Fields</span>
+                    <span className="text-xs text-slate-400">Instantly bans automated headless scripts that fill hidden fields</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={honeypotEnabled}
+                    onChange={(e) => setHoneypotEnabled(e.target.checked)}
+                    className="w-5 h-5 accent-brand-yellow cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {/* Risk Thresholds */}
+              <div className="pt-4 border-t border-white/5 space-y-3">
+                <h4 className="text-xs font-mono text-slate-400 uppercase tracking-wider">Risk Threshold Scoring</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-mono text-slate-300 block mb-1">
+                      Auto-Block Threshold (0-100)
+                    </label>
+                    <input
+                      type="number"
+                      min={10}
+                      max={100}
+                      value={minRiskBlockScore}
+                      onChange={(e) => setMinRiskBlockScore(parseInt(e.target.value) || 80)}
+                      className="w-full bg-surface-200 border border-white/10 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-brand-yellow"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-mono text-slate-300 block mb-1">
+                      Challenge Gate Threshold (0-100)
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={90}
+                      value={minRiskChallengeScore}
+                      onChange={(e) => setMinRiskChallengeScore(parseInt(e.target.value) || 50)}
+                      className="w-full bg-surface-200 border border-white/10 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-brand-yellow"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-          </Card>
+          </div>
+
+          {/* Blocklist Manager */}
+          <div className="lg:col-span-5 space-y-6">
+            <div className="p-6 bg-surface-100 border border-white/5 rounded-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/5 pb-4">
+                <div>
+                  <h3 className="text-base font-bold text-white">Active Blocklist</h3>
+                  <span className="text-xs text-slate-400">{blocklist.length} intercepted IPs &amp; Accounts</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setShowImportModal(true)}
+                    className="text-xs h-7 gap-1"
+                  >
+                    <Upload className="w-3.5 h-3.5" /> Import
+                  </Button>
+                  {blocklist.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => setConfirmDialog({ isOpen: true, action: 'clearBlocklist' })}
+                      className="text-xs h-7"
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Add form */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (newIdentity.trim()) {
+                    handleBlocklistAction('add', 'Manual single identity block by security operator', newIdentity.trim());
+                  }
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  type="text"
+                  placeholder="Add IP address or account UID..."
+                  value={newIdentity}
+                  onChange={(e) => setNewIdentity(e.target.value)}
+                  className="flex-1 bg-surface-200 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-brand-yellow"
+                />
+                <Button size="sm" variant="primary" type="submit" disabled={!newIdentity.trim()}>
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </form>
+
+              {/* Search filter */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Search blocklist..."
+                  value={blocklistSearch}
+                  onChange={(e) => setBlocklistSearch(e.target.value)}
+                  className="w-full bg-surface-200/50 border border-white/5 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-300 font-mono focus:outline-none"
+                />
+              </div>
+
+              {/* List */}
+              <div className="max-h-[360px] overflow-y-auto space-y-1.5 pr-1">
+                {filteredBlocklist.length === 0 ? (
+                  <div className="text-center py-8 text-slate-500 text-xs font-mono">
+                    No blocklist entries match your search.
+                  </div>
+                ) : (
+                  filteredBlocklist.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between p-2.5 bg-white/5 hover:bg-white/10 rounded-lg border border-white/5 transition-colors"
+                    >
+                      <span className="font-mono text-xs text-rose-300 break-all">{item}</span>
+                      <button
+                        onClick={() => {
+                          setConfirmDialog({
+                            isOpen: true,
+                            action: 'removeBlock',
+                            targetItem: item,
+                          });
+                        }}
+                        className="p-1 hover:bg-white/10 text-slate-400 hover:text-rose-400 rounded transition-colors"
+                        title="Remove Block"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Bulk Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-surface-100 border border-white/10 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+            <h3 className="text-lg font-bold text-white">Import Blocklist (Batch)</h3>
+            <p className="text-xs text-slate-400">
+              Paste comma or newline-separated IP addresses or account identifiers to append them directly into the live rate limiter.
+            </p>
+            <textarea
+              rows={6}
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder="192.168.1.100&#10;10.0.0.45&#10;usr-bot-491..."
+              className="w-full bg-surface-200 border border-white/10 rounded-xl p-3 text-xs font-mono text-white focus:outline-none focus:border-brand-yellow"
+            />
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowImportModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const items = importText
+                    .split(/[\n,]/)
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                  if (items.length > 0) {
+                    handleBlocklistAction('import', `Bulk imported ${items.length} identities from list`, undefined, items);
+                  }
+                }}
+              >
+                Import Identities
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Destructive Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        onClose={() => setConfirmDialog({ isOpen: false, action: null })}
+        onConfirm={(reason) => {
+          if (confirmDialog.action === 'clearBlocklist') {
+            handleBlocklistAction('clear', reason);
+          } else if (confirmDialog.action === 'removeBlock' && confirmDialog.targetItem) {
+            handleBlocklistAction('remove', reason, confirmDialog.targetItem);
+          }
+          setConfirmDialog({ isOpen: false, action: null });
+        }}
+        title={
+          confirmDialog.action === 'clearBlocklist'
+            ? 'Clear Entire Blocklist'
+            : 'Remove Blocked Identity'
+        }
+        message={
+          confirmDialog.action === 'clearBlocklist'
+            ? 'Are you sure you want to unblock all identities? This will immediately allow them to submit requests.'
+            : `Are you sure you want to unblock identity ${confirmDialog.targetItem}?`
+        }
+        variant="danger"
+        confirmText="Confirm Unblock"
+        requireReason={true}
+        reasonPlaceholder="e.g. False positive verification confirmed"
+      />
     </div>
   );
 };

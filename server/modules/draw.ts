@@ -1,7 +1,10 @@
 import { Request, Response } from 'express';
 import { db, sha256Sync } from '../db/firestore';
 import { AuthenticatedRequest } from './auth';
-import { Drop, DropEntry, Seat, Reservation } from '../../shared/types';
+import { Drop, DropEntry, Seat, Offer, TicketTier } from '../../shared/types';
+import { DEFAULT_TIERS } from '../../shared/constants';
+import { ensureSeatsForDrop, getLiveBoardData } from './offers';
+import { getRealtimeInstance } from './realtime';
 import { appendAuditRecord } from './audit';
 import { runSystemInvariantCheck } from './invariants';
 
@@ -40,23 +43,22 @@ export async function triggerDrawHandler(req: AuthenticatedRequest, res: Respons
   }
   const drop = dropDoc.data as Drop;
 
-  // Retrieve or resume secret committed seed
+  // Retrieve secret committed seed or generate deterministic reveal
   let revealedSeed: string;
-  let lastAllocatedIndex = 0;
-
-  if (drop.drawState && drop.drawState.status === 'in_progress') {
-    // Resuming an interrupted draw
-    revealedSeed = drop.drawState.revealedSeed;
-    lastAllocatedIndex = drop.drawState.lastAllocatedIndex || 0;
-    console.log(`[DRAW] Resuming interrupted draw for drop ${dropId} from index ${lastAllocatedIndex}`);
+  const secretRecord = db.get('private_seeds', dropId);
+  if (secretRecord) {
+    revealedSeed = secretRecord.data.secretSeed;
+  } else if (drop.revealedSeed) {
+    revealedSeed = drop.revealedSeed;
   } else {
-    const secretRecord = db.get('private_seeds', dropId);
-    revealedSeed = secretRecord ? secretRecord.data.secretSeed : `SEED_REVEAL_${Date.now()}`;
+    revealedSeed = `SEED_REVEAL_${Date.now()}`;
   }
 
   // Freeze entries
   const allEntries = db.list(`drops/${dropId}/entries`).map(d => d.data as DropEntry);
-  const eligibleEntries = allEntries.filter(e => e.status === 'eligible' || e.status === 'selected' || e.status === 'not_selected');
+  const eligibleEntries = allEntries.filter(
+    e => e.status === 'eligible' || e.status === 'entered' || e.status === 'selected' || e.status === 'not_selected' || e.status === 'waitlisted'
+  );
 
   let rankedEntries: DropEntry[] = [];
 
@@ -73,163 +75,177 @@ export async function triggerDrawHandler(req: AuthenticatedRequest, res: Respons
     rankedEntries = executeFisherYates(eligibleEntries, revealedSeed);
   }
 
-  const winnersCount = Math.min(drop.seatCount, rankedEntries.length);
-  const winners = rankedEntries.slice(0, winnersCount);
-  const waitlist = rankedEntries.slice(winnersCount);
-
-  // Store draw progress in drop document BEFORE batch execution (Section 5 requirement)
-  db.set('drops', dropId, {
-    drawState: {
-      status: 'in_progress',
-      revealedSeed,
-      lastAllocatedIndex,
-      totalToAllocate: winnersCount,
-      totalEligible: eligibleEntries.length,
-      startedAt: drop.drawState?.startedAt || Date.now(),
-      lastBatchAt: Date.now(),
-    },
+  // Assign 1-indexed drawRank to each entry
+  rankedEntries.forEach((entry, idx) => {
+    entry.drawRank = idx + 1;
   });
 
-  // Retrieve seats
-  const seats = db.list(`drops/${dropId}/seats`).map(d => d.data as Seat);
-  const now = new Date().toISOString();
-  const holdExpiry = new Date(Date.now() + (drop.holdDurationSec || 300) * 1000).toISOString();
+  // Ensure seats with tiers exist
+  const allSeats = ensureSeatsForDrop(drop);
+  const tiers: TicketTier[] = drop.tiers && drop.tiers.length > 0 ? drop.tiers : DEFAULT_TIERS;
 
-  // ATOMIC ALLOCATION IN MULTIPLE RESUMABLE BATCHES (<= 450 ops per batch, < 500 Firestore limit)
-  // Each winner involves 3 ops (seat, reservation, entry). 100 winners = 300 ops.
-  const WINNER_CHUNK_SIZE = 100;
+  // Group available unassigned seats by tierId
+  const availableSeatsByTier: Record<string, Seat[]> = {};
+  for (const tier of tiers) {
+    availableSeatsByTier[tier.id] = allSeats.filter(
+      s => s.tierId === tier.id && s.status === 'available'
+    );
+  }
 
-  for (let i = lastAllocatedIndex; i < winnersCount; i += WINNER_CHUNK_SIZE) {
-    const chunkEnd = Math.min(i + WINNER_CHUNK_SIZE, winnersCount);
-    const chunkWinners = winners.slice(i, chunkEnd);
-    const batchOps: Array<any> = [];
+  const now = Date.now();
+  const holdDurationMs = (drop.holdDurationSec || 300) * 1000;
+  const expiresAt = now + holdDurationMs;
+  const batchOps: any[] = [];
+  const createdOffers: Offer[] = [];
 
-    chunkWinners.forEach((winner, offset) => {
-      const seatIndex = i + offset;
-      const seat = seats[seatIndex];
-      if (seat) {
-        const resId = `res_${dropId}_${winner.uid}`;
-        const existingRes = db.get(`drops/${dropId}/reservations`, resId);
+  let totalAllocated = 0;
+  let totalWaitlisted = 0;
 
-        // Idempotency: only allocate if not already allocated to this user
-        if (!existingRes || existingRes.data.status !== 'active') {
-          // 1. Seat hold
-          batchOps.push({
-            type: 'set',
-            collection: `drops/${dropId}/seats`,
-            docId: seat.id,
-            data: {
-              ...seat,
-              status: 'held',
-              holderUid: winner.uid,
-              holdExpiresAt: holdExpiry,
-            },
-          });
+  // Round 1 allocation, in draw-rank order, for each entry:
+  for (const entry of rankedEntries) {
+    // Preferences in order
+    const prefs = entry.preferences && entry.preferences.length > 0
+      ? entry.preferences
+      : tiers.map(t => t.id);
 
-          // 2. Reservation record
-          const reservation: Reservation = {
-            id: resId,
-            dropId,
-            uid: winner.uid,
-            seatId: seat.id,
-            status: 'active',
-            expiresAt: holdExpiry,
-            createdAt: now,
-          };
-          batchOps.push({
-            type: 'set',
-            collection: `drops/${dropId}/reservations`,
-            docId: resId,
-            data: reservation,
-          });
+    let assignedSeat: Seat | null = null;
+    let assignedTier: TicketTier | null = null;
 
-          // 3. Winner entry marked selected
-          batchOps.push({
-            type: 'set',
-            collection: `drops/${dropId}/entries`,
-            docId: winner.identityKey,
-            data: {
-              ...winner,
-              status: 'selected',
-              drawRank: seatIndex + 1,
-            },
-          });
-        }
+    // Take the first tier that still has an unassigned seat
+    for (const tierId of prefs) {
+      const tierSeats = availableSeatsByTier[tierId];
+      if (tierSeats && tierSeats.length > 0) {
+        assignedSeat = tierSeats.shift()!;
+        assignedTier = tiers.find(t => t.id === tierId) || null;
+        break;
       }
-    });
-
-    if (batchOps.length > 0) {
-      db.batchWrite(batchOps);
     }
 
-    // Persist progress checkpoint to Firestore
-    db.set('drops', dropId, {
-      drawState: {
-        status: 'in_progress',
-        revealedSeed,
-        lastAllocatedIndex: chunkEnd,
-        totalToAllocate: winnersCount,
-        lastBatchAt: Date.now(),
-      },
-    });
+    if (assignedSeat && assignedTier) {
+      // Create OFFER
+      const offerId = `off_${dropId}_${entry.uid}`;
+      const offer: Offer = {
+        id: offerId,
+        dropId,
+        entryId: entry.identityKey,
+        uid: entry.uid,
+        seatId: assignedSeat.id,
+        tierId: assignedTier.id,
+        tierName: assignedTier.name,
+        seatLabel: assignedSeat.label,
+        price: assignedTier.price,
+        status: 'offered',
+        createdAt: now,
+        expiresAt,
+      };
+
+      createdOffers.push(offer);
+      totalAllocated++;
+
+      // Seat becomes HELD
+      assignedSeat.status = 'held';
+      assignedSeat.currentOfferId = offerId;
+      assignedSeat.holderUid = entry.uid;
+      assignedSeat.holdExpiresAt = new Date(expiresAt).toISOString();
+
+      batchOps.push({
+        type: 'set',
+        collection: `drops/${dropId}/seats`,
+        docId: assignedSeat.id,
+        data: assignedSeat,
+      });
+
+      // Offer record
+      batchOps.push({
+        type: 'set',
+        collection: `drops/${dropId}/offers`,
+        docId: offerId,
+        data: offer,
+      });
+
+      // Entry becomes OFFERED
+      entry.status = 'offered';
+      entry.currentOfferId = offerId;
+
+      batchOps.push({
+        type: 'set',
+        collection: `drops/${dropId}/entries`,
+        docId: entry.identityKey,
+        data: entry,
+      });
+    } else {
+      // If none of the user's preferred tiers has a seat left -> WAITLISTED
+      entry.status = 'waitlisted';
+      entry.currentOfferId = null;
+      totalWaitlisted++;
+
+      batchOps.push({
+        type: 'set',
+        collection: `drops/${dropId}/entries`,
+        docId: entry.identityKey,
+        data: entry,
+      });
+    }
   }
 
-  // Batch process waitlist entries in chunks of 450 ops
-  for (let w = 0; w < waitlist.length; w += 450) {
-    const waitlistChunk = waitlist.slice(w, w + 450);
-    const waitlistOps = waitlistChunk.map((waitEntry, idx) => ({
-      type: 'set' as const,
-      collection: `drops/${dropId}/entries`,
-      docId: waitEntry.identityKey,
-      data: {
-        ...waitEntry,
-        status: 'not_selected' as const,
-        drawRank: winnersCount + w + idx + 1,
-      },
-    }));
-    db.batchWrite(waitlistOps);
+  // Commit batch updates in slices of 450 ops
+  for (let b = 0; b < batchOps.length; b += 450) {
+    db.batchWrite(batchOps.slice(b, b + 450));
   }
 
-  // Update drop to 'drawn' state with completed drawState
-  db.set('drops', dropId, {
+  // Update drop document
+  const updatedDrop: Drop = {
+    ...drop,
     status: 'drawn',
     revealedSeed,
-    drawState: {
-      status: 'completed',
-      revealedSeed,
-      lastAllocatedIndex: winnersCount,
-      totalToAllocate: winnersCount,
-      completedAt: Date.now(),
-    },
-    stats: {
-      ...drop.stats,
-      allocated: winnersCount,
-      held: winnersCount,
-    },
-  });
+  };
+  db.set('drops', dropId, updatedDrop);
 
-  // Log to append-only audit ledger
-  appendAuditRecord('DRAW_COMPLETED', 'system', {
+  appendAuditRecord('DRAW_EXECUTED', req.user?.uid || 'admin', {
     dropId,
-    mode: drop.mode,
     revealedSeed,
-    winnersCount,
-    totalEntries: eligibleEntries.length,
+    totalEligible: eligibleEntries.length,
+    totalAllocated,
+    totalWaitlisted,
   });
 
-  // Automatically run invariant integrity checker
-  const invariantResult = runSystemInvariantCheck(dropId);
+  // Socket.io Realtime Broadcasts
+  const realtime = getRealtimeInstance();
+  if (realtime) {
+    realtime.broadcastDrawResult(dropId, totalAllocated, revealedSeed);
+
+    // Notify each offered user individually
+    for (const off of createdOffers) {
+      realtime.notifyOfferCreated(off.uid, off);
+    }
+
+    // Notify each waitlisted user of their position
+    const waitlistedEntries = rankedEntries
+      .filter(e => e.status === 'waitlisted')
+      .sort((a, b) => (a.drawRank || 0) - (b.drawRank || 0));
+
+    waitlistedEntries.forEach((wEntry, idx) => {
+      realtime.notifyWaitlistPosition(wEntry.uid, {
+        position: idx + 1,
+        totalWaitlisted: waitlistedEntries.length,
+      });
+    });
+
+    const liveBoard = getLiveBoardData(dropId);
+    realtime.broadcastBoardUpdate(dropId, liveBoard);
+    realtime.broadcastQueueUpdate(dropId, {
+      peopleWaiting: liveBoard.peopleWaiting,
+      totalHeld: liveBoard.totalHeld,
+      soonestExpiryMs: liveBoard.soonestExpiryMs,
+    });
+  }
 
   return res.json({
     success: true,
     dropId,
     revealedSeed,
-    winnersCount,
-    drawState: {
-      status: 'completed',
-      lastAllocatedIndex: winnersCount,
-      totalToAllocate: winnersCount,
-    },
-    invariants: invariantResult,
+    totalAllocated,
+    totalWaitlisted,
+    createdOffersCount: createdOffers.length,
   });
 }

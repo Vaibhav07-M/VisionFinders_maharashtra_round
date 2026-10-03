@@ -17,6 +17,46 @@ import { SecurityConfig } from '../../server/modules/abuse';
 // Relative API client ensuring zero hardcoded localhost URLs
 const API_BASE = '/api';
 
+export function getAdminHeaders(): Record<string, string> {
+  const sessionId = localStorage.getItem('fairdrop_session_id') || 'sess_user_marcus_organizer';
+  const userJson = localStorage.getItem('fairdrop_user');
+  const persona = localStorage.getItem('fairdrop_persona');
+  let user: UserProfile | null = null;
+  try {
+    user = userJson ? JSON.parse(userJson) : null;
+  } catch (_) {}
+
+  // Determine admin role and credentials
+  let role: UserRole = 'organizer';
+  let uid = 'user_marcus_organizer';
+  let email = 'marcus.v@festivalgroup.com';
+
+  if (user && ['organizer', 'security', 'evaluator', 'readonly'].includes(user.role)) {
+    role = user.role;
+    uid = user.uid;
+    email = user.email;
+  } else if (persona === 'security') {
+    role = 'security';
+    uid = 'user_dr_elena_sec';
+    email = 'elena.rostova@fairdrop.io';
+  } else if (persona === 'evaluator') {
+    role = 'evaluator';
+    uid = 'user_prof_arun_eval';
+    email = 'arun.patel@securitybench.org';
+  }
+
+  const effectiveSession = sessionId || `sess_${uid}`;
+
+  return {
+    'Content-Type': 'application/json',
+    'x-session-id': effectiveSession,
+    'Authorization': `Bearer ${effectiveSession}`,
+    'x-user-uid': uid,
+    'x-user-role': role,
+    'x-user-email': email,
+  };
+}
+
 function getAuthHeaders(): Record<string, string> {
   const sessionId = localStorage.getItem('fairdrop_session_id') || '';
   const userJson = localStorage.getItem('fairdrop_user');
@@ -103,10 +143,30 @@ export const api = {
       }),
   },
 
+  // Synchronized Clock
+  time: {
+    get: () => request<{ serverTime: number }>('/time'),
+  },
+
   // Drops
   drops: {
     list: () => request<{ drops: Drop[] }>('/drops'),
     get: (id: string) => request<{ drop: Drop }>(`/drops/${id}`),
+    getBoard: (id: string) => request<{ board: import('@shared/types').LiveBoardData }>(`/drops/${id}/board`),
+    getMe: (id: string) => request<import('@shared/types').UserDropState>(`/drops/${id}/me`),
+    updatePreferences: (id: string, preferences: string[]) =>
+      request<{ success: boolean; entry: DropEntry }>(`/drops/${id}/preferences`, {
+        method: 'PUT',
+        body: JSON.stringify({ preferences }),
+      }),
+    leaveWaitlist: (id: string) =>
+      request<{ success: boolean; message: string }>(`/drops/${id}/waitlist/leave`, {
+        method: 'POST',
+      }),
+    nextRound: (id: string) =>
+      request<{ success: boolean; drop: Drop; availableSeats: number }>(`/admin/drops/${id}/next-round`, {
+        method: 'POST',
+      }),
     create: (data: Partial<Drop>) =>
       request<{ drop: Drop }>('/drops', {
         method: 'POST',
@@ -126,12 +186,25 @@ export const api = {
       }),
   },
 
+  // 5-Minute Offers & Real Cascade
+  offers: {
+    pay: (offerId: string) =>
+      request<{ success: boolean; ticket: Ticket; isDuplicate?: boolean }>(`/offers/${offerId}/pay`, {
+        method: 'POST',
+      }),
+    release: (offerId: string) =>
+      request<{ success: boolean; message: string; cascaded?: boolean }>(`/offers/${offerId}/release`, {
+        method: 'POST',
+      }),
+  },
+
   // Entry & Registration
   entry: {
     join: (dropId: string, payload: {
-      nonce: number;
-      idempotencyKey: string;
+      nonce?: number;
+      idempotencyKey?: string;
       website_trap?: string;
+      preferences?: string[];
       isBot?: boolean;
       speedClass?: string;
     }) =>

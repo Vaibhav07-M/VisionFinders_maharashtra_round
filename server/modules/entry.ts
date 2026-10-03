@@ -128,6 +128,19 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
     });
   }
 
+  // Tier preferences (Section 2 requirement)
+  const dropTiers = drop.tiers || [
+    { id: 'vip' },
+    { id: 'platinum' },
+    { id: 'gold' },
+    { id: 'silver' },
+    { id: 'bronze' },
+  ];
+  const validTierIds = dropTiers.map((t: any) => t.id);
+  const inputPrefs = Array.isArray(req.body.preferences) ? req.body.preferences : [];
+  const preferences = inputPrefs.filter((p: string) => validTierIds.includes(p));
+  const finalPreferences = preferences.length > 0 ? preferences : validTierIds;
+
   // 9. CREATE ENTRY DOCUMENT (Doc ID = identityKey enforces atomic uniqueness)
   const receiptId = `RCP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   const now = new Date().toISOString();
@@ -141,7 +154,8 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
     arrivedAt: now,
     serverTimestamp: Date.now(),
     riskScore,
-    status: riskScore >= (drop.defenceConfig?.minRiskChallengeScore ?? 50) ? 'flagged' : 'eligible',
+    status: riskScore >= (drop.defenceConfig?.minRiskChallengeScore ?? 50) ? 'flagged' : 'entered',
+    preferences: finalPreferences,
     isBot: req.body.isBot || false,
     speedClass: req.body.speedClass || 'normal',
   };
@@ -156,7 +170,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
       totalEntriesCount: (drop.totalEntriesCount || 0) + 1,
       stats: {
         ...drop.stats,
-        eligible: (drop.stats?.eligible || 0) + (newEntry.status === 'eligible' ? 1 : 0),
+        eligible: (drop.stats?.eligible || 0) + (newEntry.status === 'entered' || newEntry.status === 'eligible' ? 1 : 0),
         flagged: (drop.stats?.flagged || 0) + (newEntry.status === 'flagged' ? 1 : 0),
       },
     };
@@ -167,6 +181,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
       dropId,
       identityKey,
       riskScore,
+      preferences: finalPreferences,
     });
 
     if (onEntryCreatedCallback) {
@@ -188,4 +203,57 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
     }
     return res.status(500).json({ error: err.message });
   }
+}
+
+// PUT /api/drops/:id/preferences (Edit preferences while window is open)
+export function updatePreferencesHandler(req: AuthenticatedRequest, res: Response) {
+  const { id: dropId } = req.params;
+  const uid = req.user?.uid || 'user_guest';
+  const email = req.user?.email || uid;
+  const identityKey = sha256Sync(email);
+
+  const dropDoc = db.get('drops', dropId);
+  if (!dropDoc) {
+    return res.status(404).json({ error: 'DROP_NOT_FOUND', message: 'Drop not found.' });
+  }
+  const drop = dropDoc.data as Drop;
+
+  if (drop.status !== 'open') {
+    return res.status(400).json({
+      error: 'WINDOW_CLOSED',
+      message: 'Preferences can only be modified while the registration window is open.',
+    });
+  }
+
+  // Find user's entry
+  let entryDoc = db.get(`drops/${dropId}/entries`, identityKey);
+  let entry = entryDoc ? (entryDoc.data as DropEntry) : null;
+
+  if (!entry) {
+    const all = db.list(`drops/${dropId}/entries`).map(d => d.data as DropEntry);
+    entry = all.find(e => e.uid === uid) || null;
+  }
+
+  if (!entry) {
+    return res.status(404).json({ error: 'ENTRY_NOT_FOUND', message: 'You have not entered this drop.' });
+  }
+
+  const { preferences } = req.body;
+  if (!Array.isArray(preferences) || preferences.length === 0) {
+    return res.status(400).json({ error: 'INVALID_PREFERENCES', message: 'Preferences must be an array of at least 1 tier ID.' });
+  }
+
+  const updatedEntry: DropEntry = {
+    ...entry,
+    preferences,
+  };
+
+  db.set(`drops/${dropId}/entries`, entry.identityKey, updatedEntry);
+
+  appendAuditRecord('PREFERENCES_UPDATED', uid, {
+    dropId,
+    preferences,
+  });
+
+  return res.json({ success: true, entry: updatedEntry });
 }

@@ -1,169 +1,286 @@
-import React, { useState, useEffect } from 'react';
-import { useApp } from '@/context/AppContext';
-import { Card } from '@/components/ui/Card';
+import React, { useState, useEffect, useCallback } from 'react';
+import { PageHeader } from '@/components/admin/PageHeader';
+import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
+import { SkeletonLoader } from '@/components/admin/SkeletonLoader';
+import { ErrorState } from '@/components/admin/ErrorState';
+import { EmptyState } from '@/components/admin/EmptyState';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Table, TableHead, TableBody, TableRow, TableCell, TableHeaderCell } from '@/components/ui/Table';
-import { LifeBuoy, CheckCircle2, XCircle, Loader2, AlertCircle } from 'lucide-react';
-import { api } from '@/utils/api';
-import { Appeal } from '@shared/types';
+import {
+  LifeBuoy,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  ShieldAlert,
+  ShieldCheck,
+  User,
+  Fingerprint,
+  Calendar,
+  MessageSquare,
+  AlertCircle,
+} from 'lucide-react';
+import { useApp } from '@/context/AppContext';
+import { getAdminHeaders } from '@/utils/api';
 
 export const AppealsQueuePage: React.FC = () => {
   const { addToast } = useApp();
-  const [appeals, setAppeals] = useState<Appeal[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  // Status Tab: 'pending' | 'approved' | 'rejected'
+  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [appeals, setAppeals] = useState<any[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchAppeals = async () => {
+  // Decision Modal
+  const [decisionModal, setDecisionModal] = useState<{
+    isOpen: boolean;
+    appeal: any | null;
+    decision: 'approved' | 'rejected' | null;
+  }>({
+    isOpen: false,
+    appeal: null,
+    decision: null,
+  });
+
+  const fetchAppeals = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-      const res = await api.appeals.list();
-      setAppeals(res.appeals || []);
+      const res = await fetch(`/api/admin/appeals?status=${activeTab}`, {
+        headers: getAdminHeaders(),
+      });
+
+      if (!res.ok) throw new Error('Failed to load appeals');
+      const data = await res.json();
+      setAppeals(data.appeals || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load appeals.');
+      setError(err.message || 'Error communicating with appeals API.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab]);
 
   useEffect(() => {
     fetchAppeals();
-  }, []);
+  }, [fetchAppeals]);
 
-  const handleDecide = async (id: string, status: 'approved' | 'rejected', notes: string) => {
+  const handleConfirmDecision = async (reviewNote: string) => {
+    if (!decisionModal.appeal || !decisionModal.decision) return;
+
     try {
-      const res = await api.appeals.decide(id, status, notes);
-      setAppeals(prev => prev.map(a => (a.id === id ? res.appeal : a)));
+      const res = await fetch(`/api/admin/appeals/${decisionModal.appeal.id}/decide`, {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          decision: decisionModal.decision,
+          reviewNote,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to record decision');
+      }
+
       addToast(
-        status === 'approved' ? 'success' : 'info',
+        decisionModal.decision === 'approved' ? 'success' : 'info',
         'Appeal Decided',
-        `Appeal ${id} marked ${status.toUpperCase()} in Firestore.`
+        `Appeal ${decisionModal.appeal.id} was ${decisionModal.decision.toUpperCase()}. Entry status updated & audit logged.`
       );
+
+      setDecisionModal({ isOpen: false, appeal: null, decision: null });
+      fetchAppeals();
     } catch (err: any) {
       addToast('error', 'Decision Error', err.message);
     }
   };
 
-  return (
-    <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-8 pb-20">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-            <span>Panel B · Organizer / Security</span>
-            <span>/</span>
-            <span>B8. Flagged Attendee Appeals</span>
-          </div>
-          <h1 className="text-3xl font-stamp font-black text-white uppercase tracking-tight mt-1">
-            Attendee Appeals Queue
-          </h1>
-        </div>
+  const pendingCount = appeals.filter(a => a.status === 'pending').length;
 
-        <Badge variant="amber">
-          {appeals.filter(a => a.status === 'pending').length} PENDING DECISION
-        </Badge>
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Participant Appeals Queue"
+        subtitle="Review security challenge appeals from flagged attendees, inspect contributing risk signals, and approve or reject."
+        badgeText={`${pendingCount} Pending Review`}
+        badgeVariant={pendingCount > 0 ? 'warning' : 'primary'}
+      />
+
+      {/* Status Tabs */}
+      <div className="flex items-center gap-2 border-b border-white/5 pb-3">
+        {(['pending', 'approved', 'rejected'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 rounded-xl text-xs font-mono uppercase tracking-wider font-semibold transition-all ${
+              activeTab === tab
+                ? 'bg-brand-yellow/10 text-brand-yellow border border-brand-yellow/30'
+                : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
       </div>
 
+      {/* Main Content */}
       {loading ? (
-        <div className="py-24 flex flex-col items-center justify-center space-y-3">
-          <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
-          <p className="text-xs font-mono text-slate-400">Loading appeals from Firestore...</p>
-        </div>
+        <SkeletonLoader count={4} />
       ) : error ? (
-        <Card variant="default" className="border-rose-500/30 p-8 text-center space-y-4">
-          <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
-          <h2 className="text-lg font-stamp uppercase text-white font-bold">Failed to load appeals</h2>
-          <p className="text-xs text-slate-400 font-mono">{error}</p>
-          <Button onClick={fetchAppeals} size="sm" variant="primary">
-            Retry
-          </Button>
-        </Card>
+        <ErrorState message={error} onRetry={fetchAppeals} />
       ) : appeals.length === 0 ? (
-        <Card variant="glass" className="text-center py-12 space-y-3">
-          <LifeBuoy className="w-8 h-8 text-slate-500 mx-auto" />
-          <h3 className="text-base font-bold text-white font-display">No Flagged Appeals in Queue</h3>
-          <p className="text-xs text-slate-400">
-            When an attendee's receipt is flagged by rate limits or proxy checks, they can submit an explanation here.
-          </p>
-        </Card>
+        <EmptyState
+          title={`No ${activeTab.toUpperCase()} Appeals`}
+          description={
+            activeTab === 'pending'
+              ? 'All clear! There are currently no pending participant appeals waiting for security review.'
+              : `No appeals currently in ${activeTab} status.`
+          }
+        />
       ) : (
-        <Table>
-          <TableHead>
-            <tr>
-              <TableHeaderCell>Appeal ID</TableHeaderCell>
-              <TableHeaderCell>User Email</TableHeaderCell>
-              <TableHeaderCell>Drop Event</TableHeaderCell>
-              <TableHeaderCell>Submitted Reason</TableHeaderCell>
-              <TableHeaderCell>Status</TableHeaderCell>
-              <TableHeaderCell className="text-right">Actions</TableHeaderCell>
-            </tr>
-          </TableHead>
-          <TableBody>
-            {appeals.map(appeal => (
-              <TableRow key={appeal.id}>
-                <TableCell className="font-mono text-brand-yellow font-bold">
-                  {appeal.id}
-                </TableCell>
-
-                <TableCell className="font-mono text-xs text-white">
-                  {appeal.userEmail}
-                </TableCell>
-
-                <TableCell className="text-xs text-slate-300">
-                  {appeal.dropName}
-                </TableCell>
-
-                <TableCell className="text-xs text-slate-300 max-w-xs">
-                  <p className="line-clamp-2 italic">"{appeal.reason}"</p>
-                </TableCell>
-
-                <TableCell>
-                  <Badge
-                    variant={
-                      appeal.status === 'approved'
-                        ? 'emerald'
-                        : appeal.status === 'rejected'
-                        ? 'rose'
-                        : 'amber'
-                    }
-                    size="sm"
-                  >
-                    {appeal.status.toUpperCase()}
-                  </Badge>
-                </TableCell>
-
-                <TableCell className="text-right">
-                  {appeal.status === 'pending' ? (
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        onClick={() => handleDecide(appeal.id, 'approved', 'Identity verified as genuine fan.')}
-                        leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
+        <div className="grid grid-cols-1 gap-4">
+          {appeals.map((appeal) => (
+            <div
+              key={appeal.id}
+              className="p-6 bg-surface-100 border border-white/5 rounded-2xl hover:border-white/10 transition-colors space-y-4"
+            >
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-brand-yellow/10 rounded-xl text-brand-yellow">
+                    <LifeBuoy className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-bold text-white">Appeal #{appeal.id}</span>
+                      <Badge
+                        variant={
+                          appeal.status === 'approved'
+                            ? 'emerald'
+                            : appeal.status === 'rejected'
+                            ? 'rose'
+                            : 'amber'
+                        }
                       >
-                        Approve
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => handleDecide(appeal.id, 'rejected', 'Automated proxy cluster confirmed.')}
-                        leftIcon={<XCircle className="w-3.5 h-3.5" />}
-                      >
-                        Reject
-                      </Button>
+                        {appeal.status.toUpperCase()}
+                      </Badge>
+                    </div>
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      Drop ID: {appeal.dropId} · Submitted: {new Date(appeal.createdAt).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                {appeal.status === 'pending' && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => setDecisionModal({ isOpen: true, appeal, decision: 'approved' })}
+                      className="gap-1.5"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-black" /> Approve &amp; Clear
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => setDecisionModal({ isOpen: true, appeal, decision: 'rejected' })}
+                      className="gap-1.5"
+                    >
+                      <XCircle className="w-4 h-4" /> Reject
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Appeal Reason Statement */}
+              <div className="p-4 bg-white/5 rounded-xl border border-white/5 space-y-1">
+                <span className="text-xs font-mono text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5" /> Participant Reason / Statement:
+                </span>
+                <p className="text-sm text-slate-200 italic font-sans leading-relaxed">
+                  &quot;{appeal.reason || 'No statement provided by attendee.'}&quot;
+                </p>
+              </div>
+
+              {/* Details & Signals Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+                {/* Identity & Metadata */}
+                <div className="space-y-2 p-3 bg-surface-200/50 rounded-xl border border-white/5">
+                  <span className="text-slate-400 uppercase tracking-wider block">Participant Details</span>
+                  <div className="space-y-1 text-slate-300">
+                    <div className="flex items-center gap-2">
+                      <User className="w-3.5 h-3.5 text-slate-500" />
+                      <span>UID: {appeal.uid || 'Anonymous'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Fingerprint className="w-3.5 h-3.5 text-slate-500" />
+                      <span className="break-all">Identity: {appeal.identityKey}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Risk Signals */}
+                <div className="space-y-2 p-3 bg-surface-200/50 rounded-xl border border-white/5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 uppercase tracking-wider block">Entry Risk Signals</span>
+                    <span className="font-bold text-amber-400">Score: {appeal.riskScore || 0}/100</span>
+                  </div>
+                  {appeal.signals && appeal.signals.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {appeal.signals.map((sig: string, idx: number) => (
+                        <span key={idx} className="px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px]">
+                          {sig}
+                        </span>
+                      ))}
                     </div>
                   ) : (
-                    <span className="text-[11px] font-mono text-slate-500">
-                      Decided by {appeal.decidedBy || 'Security Analyst'}
-                    </span>
+                    <div className="flex items-center gap-1.5 text-emerald-400">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>No critical automated signals triggered</span>
+                    </div>
                   )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                </div>
+              </div>
+
+              {/* Review Note if Decided */}
+              {appeal.status !== 'pending' && (
+                <div className="p-3 bg-white/5 rounded-xl border border-white/5 text-xs font-mono text-slate-300 space-y-1">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <span>Reviewed by: {appeal.reviewedBy || 'operator'}</span>
+                    <span>{appeal.reviewedAt ? new Date(appeal.reviewedAt).toLocaleString() : ''}</span>
+                  </div>
+                  <div>
+                    <strong className="text-slate-400">Review Note:</strong> {appeal.reviewNote || 'No notes provided.'}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
+
+      {/* Decision Confirmation Dialog with Required Review Note */}
+      <ConfirmDialog
+        isOpen={decisionModal.isOpen}
+        onClose={() => setDecisionModal({ isOpen: false, appeal: null, decision: null })}
+        onConfirm={handleConfirmDecision}
+        title={
+          decisionModal.decision === 'approved'
+            ? 'Approve Appeal & Restore Eligibility'
+            : 'Reject Appeal & Maintain Block'
+        }
+        message={
+          decisionModal.decision === 'approved'
+            ? `Approving this appeal will restore entry ${decisionModal.appeal?.identityKey?.slice(0, 10)}... to ELIGIBLE status. An audit record will be logged.`
+            : `Rejecting this appeal will maintain the BLOCKED status on entry ${decisionModal.appeal?.identityKey?.slice(0, 10)}... An audit record will be logged.`
+        }
+        variant={decisionModal.decision === 'approved' ? 'primary' : 'danger'}
+        confirmText={decisionModal.decision === 'approved' ? 'Approve Appeal' : 'Reject Appeal'}
+        requireReason={true}
+        reasonPlaceholder="Required operator review note (e.g. Identity verified via secondary channel)..."
+      />
     </div>
   );
 };

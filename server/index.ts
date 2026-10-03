@@ -23,10 +23,24 @@ import {
   getDropEntriesHandler,
   updateEntryStatusHandler,
 } from './modules/drops';
-import { joinDropHandler, getUserEntryHandler, registerEntryListener } from './modules/entry';
+import {
+  joinDropHandler,
+  getUserEntryHandler,
+  updatePreferencesHandler,
+  registerEntryListener,
+} from './modules/entry';
 import { triggerDrawHandler } from './modules/draw';
 import { startHoldExpirationScheduler } from './modules/reservation';
 import { checkoutHandler, getMyTicketsHandler } from './modules/checkout';
+import {
+  getBoardHandler,
+  getUserDropStateHandler,
+  payOfferHandler,
+  releaseOfferHandler,
+  leaveWaitlistHandler,
+  openNextRoundHandler,
+  startOfferExpiryScheduler,
+} from './modules/offers';
 import { listAppealsHandler, createAppealHandler, decideAppealHandler } from './modules/appeals';
 import {
   initSecurityConfig,
@@ -47,6 +61,8 @@ import { runSystemInvariantCheck } from './modules/invariants';
 import { injectFailureHandler, getInjectedLatencyMs } from './modules/failureInjection';
 import { db } from './db/firestore';
 import { runSeed } from './seed';
+import adminRouter from './routes/admin';
+import { adminMetrics } from './modules/adminMetrics';
 
 dotenv.config();
 
@@ -103,6 +119,7 @@ app.use(async (req, res, next) => {
       timestamp: Date.now(),
       isBot: req.body?.isBot || false,
     });
+    adminMetrics.recordRequest(res.statusCode, duration);
   });
 
   next();
@@ -127,12 +144,17 @@ registerEntryListener((dropId, stats) => {
 initSampleDrops();
 initSecurityConfig();
 startHoldExpirationScheduler();
+startOfferExpiryScheduler();
 
 // ==================== REST API ROUTES ==================== //
+
+// Synchronized Server Clock (Section 7)
+app.get('/api/time', (req, res) => res.json({ serverTime: Date.now() }));
 
 // Health & System Metrics
 app.get('/api/health', healthHandler);
 app.get('/api/metrics', metricsHandler);
+
 
 // Online Cloud Firestore Database Status & Sync
 app.get('/api/database/status', (req, res) => {
@@ -186,6 +208,13 @@ app.patch('/api/drops/:id/entries/:identityKey', authMiddleware, requireRole(['o
 app.post('/api/drops', authMiddleware, requireRole(['organizer', 'security']), createDropHandler);
 app.patch('/api/drops/:id', authMiddleware, requireRole(['organizer', 'security']), updateDropHandler);
 
+// Live Seat Board, Preferences & Attendee State (Sections 2, 6, 10)
+app.get('/api/drops/:id/board', getBoardHandler);
+app.get('/api/drops/:id/me', authMiddleware, getUserDropStateHandler);
+app.put('/api/drops/:id/preferences', authMiddleware, updatePreferencesHandler);
+app.post('/api/drops/:id/waitlist/leave', authMiddleware, leaveWaitlistHandler);
+app.post('/api/admin/drops/:id/next-round', authMiddleware, requireRole(['organizer', 'security', 'evaluator']), openNextRoundHandler);
+
 // Drop Entry / Join Pipeline
 app.post('/api/drops/:id/join', authMiddleware, joinDropHandler);
 app.get('/api/drops/:id/entries/me', authMiddleware, getUserEntryHandler);
@@ -193,7 +222,9 @@ app.get('/api/drops/:id/entries/me', authMiddleware, getUserEntryHandler);
 // Draw Execution & Seed Reveal
 app.post('/api/drops/:id/draw', authMiddleware, triggerDrawHandler);
 
-// Seat Checkout & HMAC Signed Pass
+// 5-Minute Offers & Seat Checkout (Sections 4, 5, 10)
+app.post('/api/offers/:id/pay', authMiddleware, payOfferHandler);
+app.post('/api/offers/:id/release', authMiddleware, releaseOfferHandler);
 app.post('/api/checkout', authMiddleware, checkoutHandler);
 app.get('/api/tickets/me', authMiddleware, getMyTicketsHandler);
 
@@ -227,6 +258,9 @@ app.get('/api/invariants/:dropId', (req, res) => {
   const result = runSystemInvariantCheck(req.params.dropId);
   res.json(result);
 });
+
+// Admin Operations Router (Protected by authMiddleware & role enforcement)
+app.use('/api/admin', adminRouter);
 
 // Chaos Failure Injection
 app.post('/api/chaos/inject', injectFailureHandler);

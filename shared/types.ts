@@ -19,7 +19,13 @@ export type EntryStatus =
   | 'blocked' 
   | 'selected' 
   | 'not_selected' 
-  | 'waitlisted';
+  | 'entered'
+  | 'offered'
+  | 'waitlisted'
+  | 'paid'
+  | 'released'
+  | 'expired'
+  | 'left';
 
 export type SeatStatus = 
   | 'available' 
@@ -32,6 +38,12 @@ export type TicketStatus =
   | 'used' 
   | 'expired' 
   | 'cancelled';
+
+export type OfferStatus = 
+  | 'offered' 
+  | 'paid' 
+  | 'released' 
+  | 'expired';
 
 export type AppealStatus = 
   | 'pending' 
@@ -48,6 +60,16 @@ export type BotProfileType =
   | 'sybil'
   | 'smart_bot'
   | 'socket_spammer';
+
+export interface TicketTier {
+  id: string; // 'vip' | 'platinum' | 'gold' | 'silver' | 'bronze'
+  name: string; // 'VIP' | 'Platinum' | 'Gold' | 'Silver' | 'Bronze'
+  price: number; // e.g. 5000, 3500, 2500, 1500, 800
+  seatCount: number; // e.g. 20, 60, 100, 150, 170
+  seatLabels?: string[];
+  description?: string;
+  prefix?: string;
+}
 
 export interface DefenceConfig {
   turnstileEnabled: boolean;
@@ -85,6 +107,8 @@ export interface Drop {
   defenceConfig: DefenceConfig;
   createdBy: string;
   description: string;
+  tiers?: TicketTier[];
+  round?: number;
   totalEntriesCount?: number;
   stats?: {
     eligible: number;
@@ -116,7 +140,9 @@ export interface DropEntry {
   serverTimestamp: number;
   riskScore: number;
   status: EntryStatus;
+  preferences?: string[]; // ordered array of tier IDs e.g. ['vip', 'platinum']
   drawRank?: number;
+  currentOfferId?: string | null;
   isBot?: boolean; // simulation only
   botProfile?: BotProfileType; // simulation only
   speedClass?: BotSpeedClass; // simulation only
@@ -125,6 +151,7 @@ export interface DropEntry {
 export interface Seat {
   id: string;
   dropId: string;
+  tierId: string; // 'vip' | 'platinum' | 'gold' | 'silver' | 'bronze'
   section: string;
   row: string;
   number: number;
@@ -133,7 +160,60 @@ export interface Seat {
   accessible: boolean;
   status: SeatStatus;
   holderUid?: string;
+  currentOfferId?: string | null;
   holdExpiresAt?: string | null; // ISO string
+}
+
+export interface Offer {
+  id: string;
+  dropId: string;
+  entryId: string;
+  uid: string;
+  seatId: string;
+  tierId: string;
+  tierName: string;
+  seatLabel: string;
+  price: number;
+  status: OfferStatus;
+  createdAt: number; // server timestamp ms
+  expiresAt: number; // server timestamp ms
+}
+
+export interface LiveTierStat {
+  tierId: string;
+  name: string;
+  price: number;
+  totalSeats: number;
+  available: number;
+  held: number;
+  sold: number;
+}
+
+export interface LiveBoardData {
+  dropId: string;
+  round: number;
+  tiers: LiveTierStat[];
+  totalAvailable: number;
+  totalHeld: number;
+  totalSold: number;
+  peopleWaiting: number;
+  soonestExpiryMs: number | null; // timestamp ms of soonest expiring offer
+  seats: Array<{
+    id: string;
+    tierId: string;
+    label: string;
+    status: SeatStatus;
+    price: number;
+  }>;
+}
+
+export interface UserDropState {
+  dropId: string;
+  entry: DropEntry | null;
+  offer: Offer | null;
+  waitlistPosition: number | null;
+  totalWaitlisted: number;
+  ticket: Ticket | null;
 }
 
 export interface Reservation {
@@ -161,6 +241,10 @@ export interface Ticket {
   signature: string;
   holderName: string;
   holderEmail: string;
+  tierName?: string;
+  pricePaid?: number;
+  attendeeName?: string;
+  qrCodeHmac?: string;
 }
 
 export interface AuditRecord {
@@ -254,3 +338,57 @@ export interface FairnessComparisonReport {
     verdict: string;
   };
 }
+
+// Admin Specific Types
+export interface AdminMetricPoint {
+  timestamp: number;
+  timeLabel: string;
+  totalRequests: number;
+  rateLimited429: number;
+  latencies: number[];
+  p95Latency: number;
+}
+
+export interface AdminKPIs {
+  totalEntries: number;
+  uniqueIdentities: number;
+  eligible: number;
+  flagged: number;
+  blocked: number;
+  rateLimitedLast60s: number;
+  seatsSold: number;
+  seatsHeld: number;
+  seatsAvailable: number;
+  pendingAppeals: number;
+}
+
+export interface AdminAlert {
+  id: string;
+  type: 'warning' | 'error' | 'info';
+  title: string;
+  message: string;
+  timestamp: number;
+}
+
+export interface AdminDashboardData {
+  drop: Drop | null;
+  drops: { id: string; name: string; status: string; mode: string; windowEnd: string }[];
+  kpis: AdminKPIs;
+  telemetry: {
+    currentRps: number;
+    current429Rate: number;
+    p95Latency: number;
+    totalRequestsLast60s: number;
+    total429Last60s: number;
+  };
+  health: {
+    uptimeSeconds: number;
+    databaseStatus: string;
+    socketStatus: string;
+    totalDrops: number;
+    activeDropId: string | null;
+  };
+  alerts: AdminAlert[];
+  recentActivity: any[];
+}
+

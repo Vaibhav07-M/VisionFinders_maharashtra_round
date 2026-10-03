@@ -43,6 +43,19 @@ function getCloudColRef(cloudDb: Firestore, colName: string): CollectionReferenc
   return ref as CollectionReference;
 }
 
+function sanitizeForFirestore(obj: any): any {
+  if (obj === undefined) return null;
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(sanitizeForFirestore);
+  const clean: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) {
+      clean[k] = sanitizeForFirestore(v);
+    }
+  }
+  return clean;
+}
+
 export class MemoryFirestore {
   private collections: Map<string, Map<string, FirestoreDoc>> = new Map();
   private storageFile: string = path.resolve(import.meta.dirname, '../../.firestore_state.json');
@@ -357,11 +370,15 @@ export class MemoryFirestore {
 
     // Async push to online Cloud Firestore
     if (this.cloudDb && this.cloudEnabled) {
-      const docRef = getCloudDocRef(this.cloudDb, collectionName, docId);
-      docRef.create(data).catch((e) => {
-        const msg = (e.message || '').split('\n')[0].slice(0, 120);
-        console.warn(`[FIREBASE CLOUD CREATE WARN for ${collectionName}/${docId}]: ${msg}`);
-      });
+      try {
+        const docRef = getCloudDocRef(this.cloudDb, collectionName, docId);
+        docRef.create(sanitizeForFirestore(data)).catch((e) => {
+          const msg = (e.message || '').split('\n')[0].slice(0, 120);
+          console.warn(`[FIREBASE CLOUD CREATE WARN for ${collectionName}/${docId}]: ${msg}`);
+        });
+      } catch (err: any) {
+        console.warn(`[FIREBASE CLOUD CREATE ERROR]: ${err.message}`);
+      }
     }
 
     return doc;
@@ -382,11 +399,15 @@ export class MemoryFirestore {
 
     // Async push to online Cloud Firestore
     if (this.cloudDb && this.cloudEnabled) {
-      const docRef = getCloudDocRef(this.cloudDb, collectionName, docId);
-      docRef.set(data, { merge }).catch((e) => {
-        const msg = (e.message || '').split('\n')[0].slice(0, 120);
-        console.warn(`[FIREBASE CLOUD SET WARN for ${collectionName}/${docId}]: ${msg}`);
-      });
+      try {
+        const docRef = getCloudDocRef(this.cloudDb, collectionName, docId);
+        docRef.set(sanitizeForFirestore(data), { merge }).catch((e) => {
+          const msg = (e.message || '').split('\n')[0].slice(0, 120);
+          console.warn(`[FIREBASE CLOUD SET WARN for ${collectionName}/${docId}]: ${msg}`);
+        });
+      } catch (err: any) {
+        console.warn(`[FIREBASE CLOUD SET ERROR]: ${err.message}`);
+      }
     }
 
     return doc;
@@ -410,11 +431,15 @@ export class MemoryFirestore {
 
     // Async delete on online Cloud Firestore
     if (this.cloudDb && this.cloudEnabled) {
-      const docRef = getCloudDocRef(this.cloudDb, collectionName, docId);
-      docRef.delete().catch((e) => {
-        const msg = (e.message || '').split('\n')[0].slice(0, 120);
-        console.warn(`[FIREBASE CLOUD DELETE WARN for ${collectionName}/${docId}]: ${msg}`);
-      });
+      try {
+        const docRef = getCloudDocRef(this.cloudDb, collectionName, docId);
+        docRef.delete().catch((e) => {
+          const msg = (e.message || '').split('\n')[0].slice(0, 120);
+          console.warn(`[FIREBASE CLOUD DELETE WARN for ${collectionName}/${docId}]: ${msg}`);
+        });
+      } catch (err: any) {
+        console.warn(`[FIREBASE CLOUD DELETE ERROR]: ${err.message}`);
+      }
     }
 
     return result;
@@ -450,7 +475,7 @@ export class MemoryFirestore {
           if (op.type === 'delete') {
             cloudBatch.delete(docRef);
           } else {
-            cloudBatch.set(docRef, op.data, { merge: op.type === 'set' });
+            cloudBatch.set(docRef, sanitizeForFirestore(op.data), { merge: op.type === 'set' });
           }
         }
         cloudBatch.commit().catch((err) => {
@@ -458,8 +483,7 @@ export class MemoryFirestore {
           console.warn(`[FIREBASE CLOUD BATCH COMMIT WARN]: ${msg}`);
         });
       } catch (err: any) {
-        const msg = (err.message || '').split('\n')[0].slice(0, 120);
-        console.warn(`[FIREBASE CLOUD BATCH PREPARE ERROR]: ${msg}`);
+        console.warn(`[FIREBASE CLOUD BATCH ERROR]: ${err.message}`);
       }
     }
   }

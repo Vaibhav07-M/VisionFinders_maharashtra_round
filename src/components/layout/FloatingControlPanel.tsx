@@ -26,6 +26,9 @@ export const FloatingControlPanel: React.FC = () => {
     resetDemoData,
   } = useApp();
 
+  const isDevMode = localStorage.getItem('DEV_MODE') === 'true' || (window as any).__DEV_MODE__ === true;
+  if (!isDevMode) return null;
+
   const activePersona = DEMO_PERSONAS[currentPersonaKey] || DEMO_PERSONAS.attendee;
 
   // Determine current active view based on pathname

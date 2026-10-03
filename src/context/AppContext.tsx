@@ -13,8 +13,12 @@ import {
   SimulationConfig,
   SimulationTrialResult,
   FairnessComparisonReport,
+  Offer,
+  LiveBoardData,
+  UserDropState,
 } from '@shared/types';
 import { api } from '@/utils/api';
+import { solvePoW } from '@/utils/crypto';
 import { DEMO_PERSONAS, DemoPersona } from './personas';
 
 export { DEMO_PERSONAS };
@@ -37,6 +41,8 @@ interface AppContextType {
   sendPhoneOtp: (phone: string) => Promise<string>;
   verifyPhoneOtp: (code: string) => Promise<boolean>;
   logout: () => void;
+  signup: (email: string, password: string, displayName: string, phone?: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
 
   // Drops
   drops: Drop[];
@@ -44,6 +50,19 @@ interface AppContextType {
   createDrop: (dropData: Partial<Drop>) => Promise<Drop>;
   updateDrop: (id: string, dropData: Partial<Drop>) => Promise<void>;
   triggerDraw: (dropId: string) => Promise<{ winnersCount: number; seed: string }>;
+  openNextRound: (dropId: string) => Promise<Drop>;
+
+  // Live Board & 5-Minute Offers (Sections 1, 2, 4, 5, 6)
+  liveBoard: LiveBoardData | null;
+  fetchLiveBoard: (dropId: string) => Promise<LiveBoardData>;
+  userDropState: UserDropState | null;
+  fetchUserDropState: (dropId: string) => Promise<UserDropState>;
+  activeOffer: Offer | null;
+  submitJoin: (dropId: string, preferences: string[]) => Promise<{ entry: DropEntry; isDuplicate: boolean }>;
+  updatePreferences: (dropId: string, preferences: string[]) => Promise<DropEntry>;
+  payOffer: (offerId: string) => Promise<Ticket>;
+  releaseOffer: (offerId: string) => Promise<void>;
+  leaveWaitlist: (dropId: string) => Promise<void>;
 
   // Entries
   entries: DropEntry[];
@@ -134,6 +153,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [appeals, setAppeals] = useState<Appeal[]>([]);
   const [auditLog, setAuditLog] = useState<AuditRecord[]>([]);
 
+  // Live Board & 5-Minute Offers (Sections 1, 2, 4, 5, 6)
+  const [liveBoard, setLiveBoard] = useState<LiveBoardData | null>(null);
+  const [userDropState, setUserDropState] = useState<UserDropState | null>(null);
+  const [activeOffer, setActiveOffer] = useState<Offer | null>(null);
+
   // Socket & Reliable Sessions
   const [socketConnected, setSocketConnected] = useState(true);
   const [reconnectNotice, setReconnectNotice] = useState<string | null>(null);
@@ -181,14 +205,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         const primaryDrop = dropsRes.drops[0];
         if (primaryDrop) {
-          // 3. Fetch seats and entries for active drop
-          const [seatsRes, entriesRes, userEntryRes] = await Promise.all([
+          // 3. Fetch seats, entries, and board for active drop
+          const [seatsRes, entriesRes, userEntryRes, boardRes, meRes] = await Promise.all([
             api.drops.getSeats(primaryDrop.id).catch(() => ({ seats: [] })),
             api.drops.getEntries(primaryDrop.id).catch(() => ({ entries: [] })),
             api.entry.getMe(primaryDrop.id).catch(() => ({ entry: null, reservation: null })),
+            api.drops.getBoard(primaryDrop.id).catch(() => ({ board: null })),
+            api.drops.getMe(primaryDrop.id).catch(() => null),
           ]);
 
           if (seatsRes.seats) setSeats(seatsRes.seats);
+          if (boardRes.board) setLiveBoard(boardRes.board);
+          if (meRes) {
+            setUserDropState(meRes);
+            if (meRes.offer) setActiveOffer(meRes.offer);
+          }
           if (entriesRes.entries) {
             const list = [...entriesRes.entries];
             if (userEntryRes.entry && !list.some(e => e.identityKey === userEntryRes.entry?.identityKey)) {
@@ -254,20 +285,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             prev.map(d => (d.id === activeDropId ? { ...d, stats: { ...d.stats, ...payload.stats } } : d))
           );
         }
+        if (payload.drop) {
+          setDrops(prev => prev.map(d => d.id === payload.drop.id ? payload.drop : d));
+        }
       });
 
       socket.on('drop:drawn', () => {
-        // Refresh seats and drop info when draw finishes
         api.drops.list().then(res => setDrops(res.drops));
-        api.drops.getSeats(activeDropId).then(res => setSeats(res.seats));
+        api.drops.getBoard(activeDropId).then(res => setLiveBoard(res.board));
+        api.drops.getMe(activeDropId).then(res => {
+          setUserDropState(res);
+          if (res.offer) setActiveOffer(res.offer);
+        });
+      });
+
+      socket.on('board:update', (board: LiveBoardData) => {
+        setLiveBoard(board);
+      });
+
+      socket.on('queue:update', (queueData: any) => {
+        setLiveBoard(prev => prev ? {
+          ...prev,
+          peopleWaiting: queueData.peopleWaiting,
+          totalHeld: queueData.totalHeld,
+          soonestExpiryMs: queueData.soonestExpiryMs,
+        } : null);
+      });
+
+      socket.on('offer:created', (offer: Offer) => {
+        setActiveOffer(offer);
+        setUserDropState(prev => prev ? { ...prev, offer } : null);
+        addToast('success', 'Seat Offered!', `You have a 5-minute offer for ${offer.seatLabel} (${offer.tierName}).`);
+      });
+
+      socket.on('offer:expired', () => {
+        setActiveOffer(null);
+        setUserDropState(prev => prev ? { ...prev, offer: null } : null);
+        addToast('warning', 'Offer Expired', 'Your time ran out and the seat was passed on.');
+      });
+
+      socket.on('offer:paid', (data: any) => {
+        if (data.ticket) {
+          setTickets(prev => [data.ticket, ...prev.filter(t => t.id !== data.ticket.id)]);
+          setUserDropState(prev => prev ? { ...prev, ticket: data.ticket, offer: data.offer } : null);
+        }
+      });
+
+      socket.on('waitlist:position', (data: any) => {
+        setUserDropState(prev => prev ? {
+          ...prev,
+          waitlistPosition: data.position,
+          totalWaitlisted: data.totalWaitlisted,
+        } : null);
       });
 
       socket.on('state:sync', (syncData: any) => {
         if (syncData.drop) {
           setDrops(prev => prev.map(d => (d.id === syncData.drop.id ? syncData.drop : d)));
         }
-        if (syncData.userReservation) {
-          setActiveReservation(syncData.userReservation);
+        if (syncData.userOffer) {
+          setActiveOffer(syncData.userOffer);
+        }
+        if (syncData.userEntry || syncData.waitlistPosition !== undefined) {
+          setUserDropState(prev => ({
+            dropId: activeDropId,
+            entry: syncData.userEntry || prev?.entry || null,
+            offer: syncData.userOffer || prev?.offer || null,
+            waitlistPosition: syncData.waitlistPosition ?? prev?.waitlistPosition ?? null,
+            totalWaitlisted: syncData.totalWaitlisted ?? prev?.totalWaitlisted ?? 0,
+            ticket: syncData.userTicket || prev?.ticket || null,
+          }));
         }
       });
 
@@ -445,6 +532,149 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { winnersCount: res.winnersCount, seed: res.revealedSeed };
     } catch (err: any) {
       addToast('error', 'Draw Failed', err.message);
+      throw err;
+    }
+  };
+
+  // Live Board & Attendee Offers
+  const fetchLiveBoard = async (dropId: string): Promise<LiveBoardData> => {
+    try {
+      const res = await api.drops.getBoard(dropId);
+      setLiveBoard(res.board);
+      return res.board;
+    } catch (err: any) {
+      console.warn('Error fetching live board:', err.message);
+      throw err;
+    }
+  };
+
+  const fetchUserDropState = async (dropId: string): Promise<UserDropState> => {
+    try {
+      const res = await api.drops.getMe(dropId);
+      setUserDropState(res);
+      if (res.offer) setActiveOffer(res.offer);
+      return res;
+    } catch (err: any) {
+      console.warn('Error fetching user drop state:', err.message);
+      throw err;
+    }
+  };
+
+  const submitJoin = async (dropId: string, preferences: string[]): Promise<{ entry: DropEntry; isDuplicate: boolean }> => {
+    try {
+      const idempotencyKey = `idemp_${user.uid}_${dropId}`;
+      const dropDoc = drops.find(d => d.id === dropId);
+      const difficulty = dropDoc?.defenceConfig?.powDifficulty ?? 2;
+      const challenge = `${dropId}:${user.uid}:${idempotencyKey}`;
+
+      let nonce = 0;
+      if (dropDoc?.defenceConfig?.powEnabled !== false && difficulty > 0) {
+        const powResult = await solvePoW(challenge, Math.min(difficulty, 3));
+        nonce = powResult.nonce;
+      }
+
+      const res = await api.entry.join(dropId, {
+        idempotencyKey,
+        preferences,
+        nonce,
+      });
+      if (res.isDuplicate) {
+        addToast('info', 'Already Entered', 'Using your existing verified entry.');
+      } else {
+        addToast('success', 'Entered Draw', 'Preferences recorded. Draw runs when window closes.');
+      }
+      setEntries(prev => [res.entry, ...prev.filter(e => e.identityKey !== res.entry.identityKey)]);
+      setUserDropState(prev => prev ? { ...prev, entry: res.entry } : null);
+      return { entry: res.entry, isDuplicate: res.isDuplicate };
+    } catch (err: any) {
+      addToast('error', 'Entry Failed', err.message);
+      throw err;
+    }
+  };
+
+  const updatePreferences = async (dropId: string, preferences: string[]): Promise<DropEntry> => {
+    try {
+      const res = await api.drops.updatePreferences(dropId, preferences);
+      addToast('success', 'Preferences Updated', 'Your tier ranking has been updated.');
+      setUserDropState(prev => prev ? { ...prev, entry: res.entry } : null);
+      return res.entry;
+    } catch (err: any) {
+      addToast('error', 'Update Failed', err.message);
+      throw err;
+    }
+  };
+
+  const payOffer = async (offerId: string): Promise<Ticket> => {
+    try {
+      const res = await api.offers.pay(offerId);
+      addToast('success', 'Payment Successful', `Ticket ${res.ticket.id} issued for ${res.ticket.seatLabel}!`);
+      setTickets(prev => [res.ticket, ...prev.filter(t => t.id !== res.ticket.id)]);
+      setActiveOffer(null);
+      setUserDropState(prev => prev ? { ...prev, ticket: res.ticket, offer: null } : null);
+      return res.ticket;
+    } catch (err: any) {
+      addToast('error', 'Payment Failed', err.message);
+      throw err;
+    }
+  };
+
+  const releaseOffer = async (offerId: string): Promise<void> => {
+    try {
+      await api.offers.release(offerId);
+      setActiveOffer(null);
+      setUserDropState(prev => prev ? { ...prev, offer: null } : null);
+      addToast('info', 'Seat Released', 'Seat released to the next waitlisted attendee.');
+    } catch (err: any) {
+      addToast('error', 'Release Failed', err.message);
+      throw err;
+    }
+  };
+
+  const leaveWaitlist = async (dropId: string): Promise<void> => {
+    try {
+      await api.drops.leaveWaitlist(dropId);
+      setUserDropState(prev => prev ? { ...prev, waitlistPosition: null, entry: prev.entry ? { ...prev.entry, status: 'left' } : null } : null);
+      addToast('info', 'Left Waitlist', 'You have left the waitlist.');
+    } catch (err: any) {
+      addToast('error', 'Error Leaving Waitlist', err.message);
+      throw err;
+    }
+  };
+
+  const openNextRound = async (dropId: string): Promise<Drop> => {
+    try {
+      const res = await api.drops.nextRound(dropId);
+      setDrops(prev => prev.map(d => d.id === dropId ? res.drop : d));
+      addToast('success', 'Next Round Opened', `Round ${res.drop.round} opened with ${res.availableSeats} available seats.`);
+      return res.drop;
+    } catch (err: any) {
+      addToast('error', 'Next Round Failed', err.message);
+      throw err;
+    }
+  };
+
+  const signup = async (email: string, password: string, displayName: string, phone?: string) => {
+    try {
+      const res = await api.auth.signup({ email, password, displayName, phone, role: 'attendee' });
+      setUser(res.user);
+      localStorage.setItem('fairdrop_session_id', res.sessionId);
+      localStorage.setItem('fairdrop_user', JSON.stringify(res.user));
+      addToast('success', `Welcome ${res.user.displayName}`, 'Account created successfully!');
+    } catch (err: any) {
+      addToast('error', 'Signup Failed', err.message);
+      throw err;
+    }
+  };
+
+  const login = async (email: string, password: string) => {
+    try {
+      const res = await api.auth.login({ email, password });
+      setUser(res.user);
+      localStorage.setItem('fairdrop_session_id', res.sessionId);
+      localStorage.setItem('fairdrop_user', JSON.stringify(res.user));
+      addToast('success', `Welcome back, ${res.user.displayName}`, 'Signed in successfully.');
+    } catch (err: any) {
+      addToast('error', 'Login Failed', err.message);
       throw err;
     }
   };
@@ -637,11 +867,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         sendPhoneOtp,
         verifyPhoneOtp,
         logout,
+        signup,
+        login,
         drops,
         getDrop,
         createDrop,
         updateDrop,
         triggerDraw,
+        openNextRound,
+        liveBoard,
+        fetchLiveBoard,
+        userDropState,
+        fetchUserDropState,
+        activeOffer,
+        submitJoin,
+        updatePreferences,
+        payOffer,
+        releaseOffer,
+        leaveWaitlist,
         entries,
         getUserEntry,
         submitEntry,

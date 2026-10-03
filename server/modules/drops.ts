@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import { db, sha256Sync } from '../db/firestore';
 import { AuthenticatedRequest } from './auth';
-import { Drop, Seat, DropEntry } from '../../shared/types';
-import { INITIAL_SAMPLE_DROPS, DEFAULT_DEFENCE_CONFIG } from '../../shared/constants';
+import { Drop, Seat, DropEntry, TicketTier } from '../../shared/types';
+import { INITIAL_SAMPLE_DROPS, DEFAULT_DEFENCE_CONFIG, DEFAULT_TIERS } from '../../shared/constants';
 import { appendAuditRecord } from './audit';
+import { ensureSeatsForDrop } from './offers';
 
 // Helper to ensure event window times are active in the future (avoids 00:00:00 expired countdowns)
 export function ensureActiveWindow(drop: Drop): Drop {
@@ -56,35 +57,8 @@ export function initSampleDrops() {
       const activeDrop = ensureActiveWindow({ ...drop });
       db.set('drops', activeDrop.id, activeDrop);
 
-      // Batched seat insertion
-      const sections = ['Orchestra A', 'Orchestra B', 'Mezzanine Center', 'Balcony Front'];
-      const batchOps: any[] = [];
-      for (let i = 1; i <= 500; i++) {
-        const section = sections[Math.floor((i - 1) / 125)];
-        const row = String.fromCharCode(65 + Math.floor(((i - 1) % 125) / 25));
-        const seatNum = ((i - 1) % 25) + 1;
-        const seatId = `seat-${i}`;
-        const seat: Seat = {
-          id: seatId,
-          dropId: drop.id,
-          section,
-          row,
-          number: seatNum,
-          label: `${section} · Row ${row}-${seatNum}`,
-          price: drop.price,
-          accessible: i % 25 === 1,
-          status: i > 485 ? 'sold' : 'available',
-        };
-        batchOps.push({
-          type: 'set',
-          collection: `drops/${drop.id}/seats`,
-          docId: seatId,
-          data: seat,
-        });
-      }
-      for (let b = 0; b < batchOps.length; b += 450) {
-        db.batchWrite(batchOps.slice(b, b + 450));
-      }
+      // Initialize tiered seats
+      ensureSeatsForDrop(activeDrop);
     }
   }
 }
@@ -97,7 +71,7 @@ export function listDropsHandler(req: Request, res: Response) {
 
 // GET /api/drops/:id
 export function getDropHandler(req: Request, res: Response) {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const doc = db.get('drops', id);
   if (!doc) {
     return res.status(404).json({ error: 'Drop not found' });
@@ -108,21 +82,22 @@ export function getDropHandler(req: Request, res: Response) {
 
 // GET /api/drops/:id/seats
 export function getDropSeatsHandler(req: Request, res: Response) {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const seats = db.list(`drops/${id}/seats`).map(d => d.data as Seat);
   return res.json({ seats, count: seats.length });
 }
 
 // GET /api/drops/:id/entries
 export function getDropEntriesHandler(req: Request, res: Response) {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const entries = db.list(`drops/${id}/entries`).map(d => d.data as DropEntry);
   return res.json({ entries, count: entries.length });
 }
 
 // PATCH /api/drops/:id/entries/:identityKey
 export function updateEntryStatusHandler(req: AuthenticatedRequest, res: Response) {
-  const { id: dropId, identityKey } = req.params;
+  const dropId = req.params.id as string;
+  const identityKey = req.params.identityKey as string;
   const { status, riskScore } = req.body;
 
   const entryDoc = db.get(`drops/${dropId}/entries`, identityKey);
@@ -150,7 +125,7 @@ export function updateEntryStatusHandler(req: AuthenticatedRequest, res: Respons
 
 // PATCH /api/drops/:id
 export function updateDropHandler(req: AuthenticatedRequest, res: Response) {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const updates = req.body;
   const doc = db.get('drops', id);
   if (!doc) {
@@ -175,13 +150,14 @@ export function updateDropHandler(req: AuthenticatedRequest, res: Response) {
 // POST /api/drops
 export async function createDropHandler(req: AuthenticatedRequest, res: Response) {
   const data = req.body;
-  const id = `drop-${Date.now().toString(36)}`;
+  const id = data.id || `drop-${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
   
   // Section 1 Commit-Reveal: publish hash(seed) before window opens
   const secretSeed = `SEED_${Date.now()}_${Math.random().toString(36).substring(2)}`;
   const seedCommitHash = sha256Sync(secretSeed);
 
-  const seatCount = data.seatCount || 500;
+  const tiers: TicketTier[] = data.tiers && data.tiers.length > 0 ? data.tiers : DEFAULT_TIERS;
+  const seatCount = data.seatCount || tiers.reduce((acc: number, t: TicketTier) => acc + t.seatCount, 0) || 500;
   const newDrop: Drop = {
     id,
     name: data.name || 'Exclusive Allocation Event',
@@ -191,7 +167,7 @@ export async function createDropHandler(req: AuthenticatedRequest, res: Response
     heroImage: data.heroImage || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=1600&q=80',
     seatCount,
     price: data.price || 85,
-    currency: 'USD',
+    currency: data.currency || 'USD',
     perPersonLimit: 1,
     windowStart: data.windowStart || new Date().toISOString(),
     windowEnd: data.windowEnd || new Date(Date.now() + 1000 * 60 * 15).toISOString(),
@@ -199,6 +175,7 @@ export async function createDropHandler(req: AuthenticatedRequest, res: Response
     holdDurationSec: data.holdDurationSec || 300,
     mode: data.mode || 'FAIR_DROP',
     status: 'open',
+    tiers,
     seedCommitHash,
     revealedSeed: null, // Revealed ONLY after draw closes
     defenceConfig: data.defenceConfig || DEFAULT_DEFENCE_CONFIG,
@@ -217,37 +194,8 @@ export async function createDropHandler(req: AuthenticatedRequest, res: Response
 
   db.set('drops', id, newDrop);
 
-  // Initialize 500 seats in batched writes
-  const sections = ['Orchestra A', 'Orchestra B', 'Mezzanine Center', 'Balcony Front'];
-  const batchOps: Array<any> = [];
-
-  for (let i = 1; i <= seatCount; i++) {
-    const section = sections[Math.floor((i - 1) / Math.max(1, seatCount / 4))];
-    const row = String.fromCharCode(65 + Math.floor(((i - 1) % 125) / 25));
-    const seatNum = ((i - 1) % 25) + 1;
-    const seatId = `seat-${i}`;
-    batchOps.push({
-      type: 'set',
-      collection: `drops/${id}/seats`,
-      docId: seatId,
-      data: {
-        id: seatId,
-        dropId: id,
-        section,
-        row,
-        number: seatNum,
-        label: `${section} · Row ${row}-${seatNum}`,
-        price: newDrop.price,
-        accessible: i % 25 === 1,
-        status: 'available',
-      },
-    });
-  }
-
-  // Split into chunks of 450 ops (Firestore max 500 ops per batch)
-  for (let i = 0; i < batchOps.length; i += 450) {
-    db.batchWrite(batchOps.slice(i, i + 450));
-  }
+  // Initialize tiered seats (VIP, Platinum, Gold, Silver, Bronze)
+  ensureSeatsForDrop(newDrop);
 
   // Record committed seed secret in private server store
   db.set('private_seeds', id, { secretSeed, seedCommitHash });

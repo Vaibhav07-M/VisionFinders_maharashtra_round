@@ -12,6 +12,8 @@ export const Navbar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const {
+    user,
+    logout,
     loginAsPersona,
     reconnectNotice,
   } = useApp();
@@ -76,56 +78,28 @@ export const Navbar: React.FC = () => {
 
           {/* DYNAMIC NAV LINKS PER PORTAL */}
           <nav className="hidden md:flex items-center gap-1 text-xs font-semibold">
-            {/* VIEW 1: ATTENDEE LINKS (Drops Catalog & Waiting Room removed, Adversarial Lab added) */}
+            {/* VIEW 1: ATTENDEE LINKS (Clean: Home and My Tickets per Section 8) */}
             {currentView === 'attendee' && (
               <>
                 <Link
-                  to="/drops/drop-jack-white-vault"
+                  to="/"
                   className={`px-3 py-1.5 rounded-lg transition-colors ${
-                    location.pathname === '/drops/drop-jack-white-vault' ? 'bg-white/10 text-brand-yellow font-bold' : 'text-slate-300 hover:text-white hover:bg-white/5'
+                    isCurrent('/') || location.pathname.startsWith('/drops')
+                      ? 'bg-white/10 text-brand-yellow font-bold'
+                      : 'text-slate-300 hover:text-white hover:bg-white/5'
                   }`}
                 >
-                  Featured Event
-                </Link>
-                <Link
-                  to="/drops/drop-jack-white-vault/enter"
-                  className={`px-3 py-1.5 rounded-lg transition-colors ${
-                    location.pathname.endsWith('/enter') ? 'bg-white/10 text-brand-yellow font-bold' : 'text-slate-300 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  Enter Drop (PoW)
-                </Link>
-                <Link
-                  to="/drops/drop-jack-white-vault/live"
-                  className={`px-3 py-1.5 rounded-lg transition-colors ${
-                    location.pathname.endsWith('/live') ? 'bg-white/10 text-brand-yellow font-bold' : 'text-slate-300 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  Live Telemetry
+                  Home
                 </Link>
                 <Link
                   to="/me"
                   className={`px-3 py-1.5 rounded-lg transition-colors ${
-                    isCurrent('/me') ? 'bg-white/10 text-brand-yellow font-bold' : 'text-slate-300 hover:text-white hover:bg-white/5'
+                    isCurrent('/me')
+                      ? 'bg-white/10 text-brand-yellow font-bold'
+                      : 'text-slate-300 hover:text-white hover:bg-white/5'
                   }`}
                 >
-                  My Tickets (QR)
-                </Link>
-                <Link
-                  to="/proof/drop-jack-white-vault"
-                  className={`px-3 py-1.5 rounded-lg transition-colors ${
-                    location.pathname.startsWith('/proof') ? 'bg-white/10 text-brand-yellow font-bold' : 'text-slate-300 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  Seed Proof
-                </Link>
-                <Link
-                  to="/lab/attack-designer"
-                  className={`px-3 py-1.5 rounded-lg transition-colors ${
-                    location.pathname.startsWith('/lab') ? 'bg-rose-500/20 text-rose-300 font-bold' : 'text-slate-300 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  Adversarial Lab
+                  My Tickets
                 </Link>
               </>
             )}
@@ -239,13 +213,34 @@ export const Navbar: React.FC = () => {
             )}
           </nav>
 
-          {/* Right Action */}
+          {/* Right Action: Visible Create Account / Log out per Section 8 */}
           <div className="flex items-center gap-2">
-            <Link to="/login">
-              <button className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10">
-                Switch Account
-              </button>
-            </Link>
+            {user && !user.uid.startsWith('guest_') ? (
+              <div className="flex items-center gap-2.5">
+                <span className="text-xs font-mono text-slate-300 hidden sm:inline px-2 py-1 rounded bg-white/5 border border-white/10">
+                  {user.displayName || user.email}
+                </span>
+                <button
+                  onClick={logout}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 transition-colors"
+                >
+                  Log out
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Link to="/login">
+                  <button className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 transition-colors">
+                    Login
+                  </button>
+                </Link>
+                <Link to="/signup">
+                  <button className="px-3 py-1.5 rounded-lg text-xs font-bold bg-brand-yellow hover:bg-brand-yellow/90 text-black transition-colors shadow-glow-yellow/20">
+                    Create account
+                  </button>
+                </Link>
+              </div>
+            )}
 
             {/* Mobile menu trigger */}
             <button

@@ -10,6 +10,7 @@
     "simulator": "tsx simulator/index.ts",
     "seed": "tsx server/seed.ts",
     "test": "tsx tests/runner.ts",
+    "test:acceptance": "tsx tests/acceptance.ts",
     "build": "tsc -b && vite build",
     "db:status": "tsx server/db/cloudSync.ts status",
     "db:push": "tsx server/db/cloudSync.ts push",

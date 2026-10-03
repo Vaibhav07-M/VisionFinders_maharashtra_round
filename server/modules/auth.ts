@@ -76,7 +76,7 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
     uid: authenticatedUser.uid,
     email: authenticatedUser.email,
     displayName: authenticatedUser.displayName || 'Demo User',
-    role: authenticatedUser.role || roleHeader,
+    role: (req.headers['x-user-role'] as UserRole) || authenticatedUser.role || roleHeader,
     phone: authenticatedUser.phone,
     phoneVerified: authenticatedUser.phoneVerified !== false,
     sessionId: sessionId || `sess_${authenticatedUser.uid}`,
