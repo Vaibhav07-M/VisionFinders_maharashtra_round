@@ -37,6 +37,19 @@ export const LiveStatusPage: React.FC = () => {
 
   const drop = getDrop(id || 'drop-jack-white-vault') || drops[0];
 
+  // Live real entry count from Firestore
+  const [liveEntries, setLiveEntries] = useState(drop?.totalEntriesCount || 0);
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (drop && drop.status === 'open') {
+        setLiveEntries(prev => prev + Math.floor(Math.random() * 5));
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [drop?.status]);
+
   if (!drop) {
     return (
       <div className="py-32 flex flex-col items-center justify-center space-y-3">
@@ -47,19 +60,6 @@ export const LiveStatusPage: React.FC = () => {
   }
 
   const userEntry = getUserEntry(drop.id);
-
-  // Live real entry count from Firestore
-  const [liveEntries, setLiveEntries] = useState(drop.totalEntriesCount || 0);
-  const [isDrawing, setIsDrawing] = useState(false);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (drop.status === 'open') {
-        setLiveEntries(prev => prev + Math.floor(Math.random() * 5));
-      }
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [drop.status]);
 
   const handleExecuteDraw = async () => {
     setIsDrawing(true);

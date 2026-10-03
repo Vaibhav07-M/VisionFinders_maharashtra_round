@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Search,
   ExternalLink,
+  Loader2,
 } from 'lucide-react';
 
 export const ProofPage: React.FC = () => {
@@ -27,14 +28,25 @@ export const ProofPage: React.FC = () => {
   const { drops, getDrop, entries, runInvariantCheck } = useApp();
 
   const drop = getDrop(dropId || 'drop-jack-white-vault') || drops[0];
-  const invariants = runInvariantCheck(drop.id);
+  const invariants = drop
+    ? runInvariantCheck(drop.id)
+    : { oversold: 0, duplicates: 0, orphanedHolds: 0, inventoryConsistent: true, valid: true };
 
   // Verification tool states
   const [testReceiptId, setTestReceiptId] = useState('RCP-JACK-0042');
-  const [testSeed, setTestSeed] = useState(drop.revealedSeed || 'SEED_VAL_7719_FAIR_DROP_VERIFIED_ENTROPY_NASHVILLE');
+  const [testSeed, setTestSeed] = useState(drop?.revealedSeed || 'SEED_VAL_7719_FAIR_DROP_VERIFIED_ENTROPY_NASHVILLE');
   const [computedRank, setComputedRank] = useState<number | null>(42);
   const [isVerifying, setIsVerifying] = useState(false);
   const [hashMatches, setHashMatches] = useState<boolean | null>(true);
+
+  if (!drop) {
+    return (
+      <div className="py-32 flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+        <p className="text-xs font-mono text-slate-400">Loading cryptographic proof data from Firestore...</p>
+      </div>
+    );
+  }
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();

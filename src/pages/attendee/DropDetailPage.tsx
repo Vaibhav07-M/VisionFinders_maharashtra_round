@@ -27,6 +27,7 @@ export const DropDetailPage: React.FC = () => {
   const { drops, getDrop, user, getUserEntry, addToast } = useApp();
 
   const drop = getDrop(id || 'drop-jack-white-vault') || drops[0];
+  const [reminderSet, setReminderSet] = useState(false);
 
   if (!drop) {
     return (
@@ -38,7 +39,6 @@ export const DropDetailPage: React.FC = () => {
   }
 
   const userEntry = getUserEntry(drop.id);
-  const [reminderSet, setReminderSet] = useState(false);
 
   const isWindowOpen = drop.status === 'open';
   const isVerified = user.phoneVerified;

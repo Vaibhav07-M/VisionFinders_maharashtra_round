@@ -359,7 +359,8 @@ export class MemoryFirestore {
     if (this.cloudDb && this.cloudEnabled) {
       const docRef = getCloudDocRef(this.cloudDb, collectionName, docId);
       docRef.create(data).catch((e) => {
-        console.warn(`[FIREBASE CLOUD CREATE WARN for ${collectionName}/${docId}]:`, e.message);
+        const msg = (e.message || '').split('\n')[0].slice(0, 120);
+        console.warn(`[FIREBASE CLOUD CREATE WARN for ${collectionName}/${docId}]: ${msg}`);
       });
     }
 
@@ -383,7 +384,8 @@ export class MemoryFirestore {
     if (this.cloudDb && this.cloudEnabled) {
       const docRef = getCloudDocRef(this.cloudDb, collectionName, docId);
       docRef.set(data, { merge }).catch((e) => {
-        console.warn(`[FIREBASE CLOUD SET WARN for ${collectionName}/${docId}]:`, e.message);
+        const msg = (e.message || '').split('\n')[0].slice(0, 120);
+        console.warn(`[FIREBASE CLOUD SET WARN for ${collectionName}/${docId}]: ${msg}`);
       });
     }
 
@@ -410,7 +412,8 @@ export class MemoryFirestore {
     if (this.cloudDb && this.cloudEnabled) {
       const docRef = getCloudDocRef(this.cloudDb, collectionName, docId);
       docRef.delete().catch((e) => {
-        console.warn(`[FIREBASE CLOUD DELETE WARN for ${collectionName}/${docId}]:`, e.message);
+        const msg = (e.message || '').split('\n')[0].slice(0, 120);
+        console.warn(`[FIREBASE CLOUD DELETE WARN for ${collectionName}/${docId}]: ${msg}`);
       });
     }
 
@@ -451,10 +454,12 @@ export class MemoryFirestore {
           }
         }
         cloudBatch.commit().catch((err) => {
-          console.warn(`[FIREBASE CLOUD BATCH COMMIT WARN]:`, err.message);
+          const msg = (err.message || '').split('\n')[0].slice(0, 120);
+          console.warn(`[FIREBASE CLOUD BATCH COMMIT WARN]: ${msg}`);
         });
       } catch (err: any) {
-        console.warn(`[FIREBASE CLOUD BATCH PREPARE ERROR]:`, err.message);
+        const msg = (err.message || '').split('\n')[0].slice(0, 120);
+        console.warn(`[FIREBASE CLOUD BATCH PREPARE ERROR]: ${msg}`);
       }
     }
   }

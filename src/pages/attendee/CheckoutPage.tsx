@@ -32,6 +32,12 @@ export const CheckoutPage: React.FC = () => {
   } = useApp();
 
   const drop = getDrop(id || 'drop-jack-white-vault') || drops[0];
+  const assignedSeat = seats.find(s => s.id === activeReservation?.seatId) || seats[0];
+
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'upi'>('card');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [payIdempotencyKey] = useState<string>(() => `pay_idemp_${Date.now().toString(36)}`);
+  const [holdExpiryDate] = useState<string>(() => activeReservation?.expiresAt || new Date(Date.now() + 1000 * 280).toISOString());
 
   if (!drop) {
     return (
@@ -42,8 +48,6 @@ export const CheckoutPage: React.FC = () => {
     );
   }
 
-  const assignedSeat = seats.find(s => s.id === activeReservation?.seatId) || seats[0];
-
   if (!assignedSeat) {
     return (
       <div className="py-32 flex flex-col items-center justify-center space-y-3">
@@ -52,11 +56,6 @@ export const CheckoutPage: React.FC = () => {
       </div>
     );
   }
-
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'upi'>('card');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [payIdempotencyKey] = useState<string>(() => `pay_idemp_${Date.now().toString(36)}`);
-  const [holdExpiryDate] = useState<string>(() => activeReservation?.expiresAt || new Date(Date.now() + 1000 * 280).toISOString());
 
   const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();

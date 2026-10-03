@@ -24,6 +24,10 @@ export const WaitingRoomPage: React.FC = () => {
 
   const drop = getDrop(id || 'drop-jack-white-vault') || drops[0];
 
+  const [deviceChecked, setDeviceChecked] = useState(true);
+  const [powWorkerReady, setPowWorkerReady] = useState(true);
+  const [socketPing, setSocketPing] = useState(24);
+
   if (!drop) {
     return (
       <div className="py-32 flex flex-col items-center justify-center space-y-3">
@@ -32,10 +36,6 @@ export const WaitingRoomPage: React.FC = () => {
       </div>
     );
   }
-
-  const [deviceChecked, setDeviceChecked] = useState(true);
-  const [powWorkerReady, setPowWorkerReady] = useState(true);
-  const [socketPing, setSocketPing] = useState(24);
 
   // If window is already open, offer immediate redirect
   const isWindowOpen = drop.status === 'open';

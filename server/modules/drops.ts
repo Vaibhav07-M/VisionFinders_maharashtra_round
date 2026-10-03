@@ -5,14 +5,60 @@ import { Drop, Seat, DropEntry } from '../../shared/types';
 import { INITIAL_SAMPLE_DROPS, DEFAULT_DEFENCE_CONFIG } from '../../shared/constants';
 import { appendAuditRecord } from './audit';
 
-// Initialize default sample drops and 500 individual seats into Firestore if empty
+// Helper to ensure event window times are active in the future (avoids 00:00:00 expired countdowns)
+export function ensureActiveWindow(drop: Drop): Drop {
+  const now = Date.now();
+  const endTime = new Date(drop.windowEnd).getTime();
+
+  // Reset main featured drop if drawn or expired so users can always interact with the live event
+  if (drop.id === 'drop-jack-white-vault' && (drop.status === 'drawn' || isNaN(endTime) || endTime <= now)) {
+    drop.status = 'open';
+    drop.windowStart = new Date(now - 1000 * 60 * 10).toISOString();
+    drop.windowEnd = new Date(now + 1000 * 60 * 90).toISOString(); // 90 minutes active countdown
+    drop.drawTime = new Date(now + 1000 * 60 * 95).toISOString();
+    drop.revealedSeed = null;
+    db.set('drops', drop.id, drop);
+    return drop;
+  }
+
+  if (drop.status === 'open' && (isNaN(endTime) || endTime <= now)) {
+    drop.windowStart = new Date(now - 1000 * 60 * 10).toISOString();
+    drop.windowEnd = new Date(now + 1000 * 60 * 90).toISOString(); // 90 minutes active countdown
+    drop.drawTime = new Date(now + 1000 * 60 * 95).toISOString();
+    db.set('drops', drop.id, drop);
+  } else if (drop.status === 'scheduled') {
+    const startTime = new Date(drop.windowStart).getTime();
+    if (isNaN(startTime) || startTime <= now) {
+      drop.windowStart = new Date(now + 1000 * 60 * 180).toISOString(); // opens in 3 hours
+      drop.windowEnd = new Date(now + 1000 * 60 * 240).toISOString();
+      drop.drawTime = new Date(now + 1000 * 60 * 245).toISOString();
+      db.set('drops', drop.id, drop);
+    }
+  }
+  return drop;
+}
+
+// Initialize default sample drops into Firestore if empty
 export function initSampleDrops() {
+  if (db.isCloudEnabled()) {
+    // In Cloud Firestore, drops and 500 individual seats are already stored online.
+    // Avoid blasting 1,500 unbatched individual network writes on boot.
+    const drops = db.list('drops').map(d => d.data as Drop);
+    for (const d of drops) {
+      ensureActiveWindow(d);
+    }
+    return;
+  }
+
   const existing = db.list('drops');
   if (existing.length === 0) {
     for (const drop of INITIAL_SAMPLE_DROPS) {
-      db.set('drops', drop.id, drop);
-      // Initialize 500 seats for default drop
+      const activeDrop = ensureActiveWindow({ ...drop });
+      db.set('drops', activeDrop.id, activeDrop);
+
+      // Batched seat insertion
       const sections = ['Orchestra A', 'Orchestra B', 'Mezzanine Center', 'Balcony Front'];
+      const batchOps: any[] = [];
       for (let i = 1; i <= 500; i++) {
         const section = sections[Math.floor((i - 1) / 125)];
         const row = String.fromCharCode(65 + Math.floor(((i - 1) % 125) / 25));
@@ -29,7 +75,15 @@ export function initSampleDrops() {
           accessible: i % 25 === 1,
           status: i > 485 ? 'sold' : 'available',
         };
-        db.set(`drops/${drop.id}/seats`, seatId, seat);
+        batchOps.push({
+          type: 'set',
+          collection: `drops/${drop.id}/seats`,
+          docId: seatId,
+          data: seat,
+        });
+      }
+      for (let b = 0; b < batchOps.length; b += 450) {
+        db.batchWrite(batchOps.slice(b, b + 450));
       }
     }
   }
@@ -37,7 +91,7 @@ export function initSampleDrops() {
 
 // GET /api/drops
 export function listDropsHandler(req: Request, res: Response) {
-  const drops = db.list('drops').map(d => d.data as Drop);
+  const drops = db.list('drops').map(d => ensureActiveWindow(d.data as Drop));
   return res.json({ drops });
 }
 
@@ -48,7 +102,8 @@ export function getDropHandler(req: Request, res: Response) {
   if (!doc) {
     return res.status(404).json({ error: 'Drop not found' });
   }
-  return res.json({ drop: doc.data });
+  const drop = ensureActiveWindow(doc.data as Drop);
+  return res.json({ drop });
 }
 
 // GET /api/drops/:id/seats

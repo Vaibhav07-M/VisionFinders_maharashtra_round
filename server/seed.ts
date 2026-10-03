@@ -5,6 +5,7 @@ import { Seat, Drop, Appeal, AuditRecord } from '../shared/types';
 import { computeTrialForConfig } from './modules/simulation';
 import { DEFAULT_SECURITY_CONFIG } from './modules/abuse';
 import { appendAuditRecord } from './modules/audit';
+import { ensureActiveWindow } from './modules/drops';
 
 export function runSeed() {
   console.log('[SEED] Starting Fair Drop database seeding...');
@@ -81,7 +82,8 @@ export function runSeed() {
 
   // 3. Seed Drops & 500 Individual Seats
   for (const drop of INITIAL_SAMPLE_DROPS) {
-    db.set('drops', drop.id, drop);
+    const activeDrop = ensureActiveWindow({ ...drop });
+    db.set('drops', activeDrop.id, activeDrop);
     // Generate private seed record for verifiable commit-reveal
     const secretSeed = `SEED_DEV_${drop.id}_KEY_2026`;
     const seedCommitHash = sha256Sync(secretSeed);

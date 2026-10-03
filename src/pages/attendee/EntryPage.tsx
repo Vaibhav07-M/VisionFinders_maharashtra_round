@@ -28,24 +28,16 @@ export const EntryPage: React.FC = () => {
 
   const drop = getDrop(id || 'drop-jack-white-vault') || drops[0];
 
-  if (!drop) {
-    return (
-      <div className="py-32 flex flex-col items-center justify-center space-y-3">
-        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
-        <p className="text-xs font-mono text-slate-400">Loading entry pipeline from Firestore...</p>
-      </div>
-    );
-  }
-
-  const existingEntry = getUserEntry(drop.id);
-
   // Form states
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() => `idemp_${Date.now().toString(36)}`);
   const [honeypotValue, setHoneypotValue] = useState(''); // hidden bot trap
   const [isSolvingPoW, setIsSolvingPoW] = useState(false);
   const [powStats, setPowStats] = useState<{ nonce: number; hash: string; iterations: number } | null>(null);
-  const [entryReceipt, setEntryReceipt] = useState(existingEntry || null);
+  const [entryReceipt, setEntryReceipt] = useState<any>(null);
   const [duplicateTestCount, setDuplicateTestCount] = useState(0);
+  const [simulatedState, setSimulatedState] = useState<'normal' | 'rate_limited' | 'challenged' | 'blocked'>('normal');
+
+  const existingEntry = drop ? getUserEntry(drop.id) : null;
 
   // Sync existing entry from database if already entered
   useEffect(() => {
@@ -54,8 +46,14 @@ export const EntryPage: React.FC = () => {
     }
   }, [existingEntry, entryReceipt]);
 
-  // Simulated challenge simulation mode toggles for demonstration
-  const [simulatedState, setSimulatedState] = useState<'normal' | 'rate_limited' | 'challenged' | 'blocked'>('normal');
+  if (!drop) {
+    return (
+      <div className="py-32 flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+        <p className="text-xs font-mono text-slate-400">Loading entry pipeline from Firestore...</p>
+      </div>
+    );
+  }
 
   const handleEnterDrop = async () => {
     // Check honeypot
