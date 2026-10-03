@@ -92,6 +92,11 @@ export class MemoryFirestore {
   }
 
   private saveToDisk() {
+    if (this.cloudEnabled) {
+      // When connected to Online Cloud Firestore, all writes commit directly to Google Cloud.
+      // Do not write to local file.
+      return;
+    }
     try {
       const serialized: Record<string, Record<string, FirestoreDoc>> = {};
       for (const [colName, docMap] of this.collections.entries()) {
@@ -135,9 +140,7 @@ export class MemoryFirestore {
         });
         this.cloudDb = getFirestore(this.cloudApp);
         this.cloudProjectId = creds.project_id;
-        this.cloudEnabled = true;
-        this.setupRealtimeListeners();
-        console.log(`[FIREBASE CLOUD] Successfully connected to Online Cloud Firestore! (Project: ${creds.project_id})`);
+        this.onCloudConnected();
         return;
       }
 
@@ -154,9 +157,7 @@ export class MemoryFirestore {
         });
         this.cloudDb = getFirestore(this.cloudApp);
         this.cloudProjectId = creds.project_id;
-        this.cloudEnabled = true;
-        this.setupRealtimeListeners();
-        console.log(`[FIREBASE CLOUD] Connected via FIREBASE_SERVICE_ACCOUNT env var! (Project: ${creds.project_id})`);
+        this.onCloudConnected();
         return;
       }
 
@@ -166,9 +167,7 @@ export class MemoryFirestore {
         this.cloudApp = initializeApp({ projectId });
         this.cloudDb = getFirestore(this.cloudApp);
         this.cloudProjectId = projectId;
-        this.cloudEnabled = true;
-        this.setupRealtimeListeners();
-        console.log(`[FIREBASE CLOUD] Connected with default credentials (Project: ${projectId})`);
+        this.onCloudConnected();
         return;
       }
 
@@ -183,10 +182,23 @@ export class MemoryFirestore {
     }
   }
 
+  private onCloudConnected() {
+    this.cloudEnabled = true;
+    this.setupRealtimeListeners();
+    console.log(`[FIREBASE CLOUD] Successfully connected directly to Online Cloud Firestore! (Project: ${this.cloudProjectId})`);
+    
+    // Automatically pull all collections from online Cloud Firestore into memory cache
+    this.pullAllFromCloud().then((res) => {
+      console.log(`[FIREBASE CLOUD] Direct cloud sync active: ${res.downloadedDocs} documents loaded from Google Cloud Firestore.`);
+    }).catch((e) => {
+      console.warn('[FIREBASE CLOUD INITIAL PULL NOTE]:', e.message);
+    });
+  }
+
   private setupRealtimeListeners() {
     if (!this.cloudDb || !this.cloudEnabled) return;
 
-    const syncCollections = ['drops', 'users', 'identities', 'securityConfig', 'appeals', 'tickets', 'simulationRuns'];
+    const syncCollections = ['drops', 'users', 'identities', 'otps', 'securityConfig', 'appeals', 'tickets', 'simulationRuns'];
     for (const col of syncCollections) {
       try {
         const unsubscribe = this.cloudDb.collection(col).onSnapshot(
@@ -226,6 +238,24 @@ export class MemoryFirestore {
     const col = this.getCollection(collectionName);
     col.delete(docId);
     this.saveToDisk();
+  }
+
+  public isCloudEnabled(): boolean {
+    return this.cloudEnabled;
+  }
+
+  public async getCloudDoc(collectionName: string, docId: string): Promise<FirestoreDoc | null> {
+    if (!this.cloudDb || !this.cloudEnabled) return null;
+    try {
+      const docRef = getCloudDocRef(this.cloudDb, collectionName, docId);
+      const snap = await docRef.get();
+      if (!snap.exists) return null;
+      const data = snap.data();
+      this.setInternal(collectionName, docId, data);
+      return { id: docId, data, createdAt: Date.now(), updatedAt: Date.now() };
+    } catch (_) {
+      return null;
+    }
   }
 
   public getCloudStatus() {

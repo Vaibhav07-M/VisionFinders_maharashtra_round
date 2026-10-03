@@ -322,27 +322,21 @@ async function runAllTests() {
     }
 
     // 3. Test Expiry with an expired number
-    const expiredPhone = `+1555${Math.floor(3000000 + Math.random() * 7000000)}`;
-    const expSend = await fetch(`${BASE_URL}/api/identity/send-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: expiredPhone }),
-    }).then(r => r.json());
-
-    // Expire the code directly in server state
+    const expiredPhone = `+1555${Math.floor(9000000 + Math.random() * 900000)}`;
     const expPhoneHash = sha256Sync(expiredPhone);
-    const existingOtp = db.get('otps', expPhoneHash);
-    if (existingOtp) {
-      db.set('otps', expPhoneHash, {
-        ...existingOtp.data,
-        expiresAt: Date.now() - 1000 * 60, // 1 min ago
-      });
-    }
+    db.set('otps', expPhoneHash, {
+      phoneHash: expPhoneHash,
+      codeHash: sha256Sync('123456'),
+      attempts: 0,
+      expiresAt: Date.now() - 1000 * 60, // 1 min ago
+    });
+    // Wait for Cloud Firestore write to commit
+    await new Promise(r => setTimeout(r, 800));
 
     const expiredRes = await fetch(`${BASE_URL}/api/identity/verify-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: expiredPhone, code: expSend.simulatedCode || '123456' }),
+      body: JSON.stringify({ phone: expiredPhone, code: '123456' }),
     });
     const expiredData = await expiredRes.json();
 

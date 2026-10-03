@@ -39,7 +39,7 @@ export function sendOtpHandler(req: AuthenticatedRequest, res: Response) {
 
 // POST /api/identity/verify-otp
 // Checks expiry, enforces max 5 attempts, creates identities/{hash(phone)}
-export function verifyOtpHandler(req: AuthenticatedRequest, res: Response) {
+export async function verifyOtpHandler(req: AuthenticatedRequest, res: Response) {
   const { phone, code } = req.body;
   const uid = req.user?.uid || 'user_alex_77';
 
@@ -51,7 +51,10 @@ export function verifyOtpHandler(req: AuthenticatedRequest, res: Response) {
   const phoneHash = sha256Sync(normalizedPhone);
   const now = Date.now();
 
-  const otpDoc = db.get('otps', phoneHash);
+  let otpDoc = db.get('otps', phoneHash);
+  if (!otpDoc && db.isCloudEnabled()) {
+    otpDoc = await db.getCloudDoc('otps', phoneHash);
+  }
   if (!otpDoc) {
     return res.status(400).json({ error: 'No active OTP found. Please request a new code.' });
   }
