@@ -113,7 +113,7 @@ export const AttackDesignerPage: React.FC = () => {
   const [drops, setDrops] = useState<Drop[]>([]);
   const [loadingDrops, setLoadingDrops] = useState(true);
   const [selectedDropId, setSelectedDropId] = useState<string>('');
-  const [targetMode, setTargetMode] = useState<'SANDBOX_CLONE' | 'LIVE_EVENT'>('SANDBOX_CLONE');
+  const [targetMode, setTargetMode] = useState<'SANDBOX_CLONE' | 'LIVE_EVENT'>('LIVE_EVENT');
 
   // State: Scenario Settings
   const [scenarioName, setScenarioName] = useState('Standard Adversarial Benchmark');
@@ -145,8 +145,9 @@ export const AttackDesignerPage: React.FC = () => {
   ]);
 
   // State: Human Traffic (Control Group)
+  const [includeHumanTraffic, setIncludeHumanTraffic] = useState<boolean>(false);
   const [humanConfig, setHumanConfig] = useState<UiHumanTrafficConfig>({
-    count: 500,
+    count: 50,
     arrivalPattern: 'surge',
     fastConnectionSplit: 0.6,
     retryOnFailure: true,
@@ -202,7 +203,7 @@ export const AttackDesignerPage: React.FC = () => {
 
   // Calculate live planned requests
   const plannedBotRequests = attackGroups.reduce((acc, g) => acc + (g.clientCount * g.requestsPerClient), 0);
-  const plannedHumanRequests = humanConfig.count * (humanConfig.retryOnFailure ? 2 : 1);
+  const plannedHumanRequests = includeHumanTraffic ? (humanConfig.count * (humanConfig.retryOnFailure ? 2 : 1)) : 0;
   const totalPlannedRequests = plannedBotRequests + plannedHumanRequests;
   const isLargeQuotaRisk = totalPlannedRequests > 2000;
 
@@ -413,7 +414,8 @@ export const AttackDesignerPage: React.FC = () => {
           },
         })),
         humanTraffic: {
-          clientCount: humanConfig.count,
+          enabled: includeHumanTraffic,
+          clientCount: includeHumanTraffic ? humanConfig.count : 0,
           pattern: humanConfig.arrivalPattern === 'surge' ? 'surge_tail' : humanConfig.arrivalPattern === 'waves' ? 'waves' : 'steady',
           fastConnectionRatio: humanConfig.fastConnectionSplit,
           retryOnFailure: humanConfig.retryOnFailure,
@@ -771,64 +773,99 @@ export const AttackDesignerPage: React.FC = () => {
 
           {/* STEP 3: Human Traffic Control Group */}
           <Card className="p-6 space-y-4 border-white/10 bg-surface-100/50">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                <Users className="w-5 h-5 text-emerald-400" />
-                3. Human Background Traffic (Control Group)
-              </h2>
-              <span className="text-xs font-mono text-slate-400">
-                {plannedHumanRequests} requests planned
-              </span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <h2 className="text-lg font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Users className="w-5 h-5 text-emerald-400" />
+                  3. Human Background Traffic (Control Group)
+                </h2>
+                <p className="text-xs font-mono text-slate-400">
+                  Optional synthetic background humans to measure false-positive rate and latency impact.
+                </p>
+              </div>
+
+              <label className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-surface-200/80 border border-white/10 cursor-pointer text-xs font-mono select-none hover:border-emerald-500/40 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={includeHumanTraffic}
+                  onChange={e => setIncludeHumanTraffic(e.target.checked)}
+                  className="w-4 h-4 rounded bg-surface-100 border-white/20 text-emerald-500 focus:ring-emerald-400 accent-emerald-500"
+                />
+                <span className={includeHumanTraffic ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
+                  {includeHumanTraffic ? 'Enabled (Simulated Humans Active)' : 'Disabled (Solo Real Human Mode)'}
+                </span>
+              </label>
             </div>
-            <p className="text-xs font-mono text-slate-400">
-              Legitimate user baseline to measure false-positive rate, latency impact, and fairness distribution.
-            </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-mono">
-              <div>
-                <label className="text-slate-400 block mb-1">Human Attendees</label>
-                <input
-                  type="number"
-                  min={10}
-                  max={5000}
-                  value={humanConfig.count}
-                  onChange={e => setHumanConfig({ ...humanConfig, count: Math.max(10, parseInt(e.target.value) || 10) })}
-                  className="w-full bg-surface-200 border border-white/10 rounded px-3 py-2 text-white font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-400 block mb-1">Arrival Pattern</label>
-                <select
-                  value={humanConfig.arrivalPattern}
-                  onChange={e => setHumanConfig({ ...humanConfig, arrivalPattern: e.target.value as any })}
-                  className="w-full bg-surface-200 border border-white/10 rounded px-3 py-2 text-white font-mono"
+            {!includeHumanTraffic ? (
+              <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-xs font-mono text-emerald-300/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 mt-1 shrink-0" />
+                  <div>
+                    <span className="font-bold text-emerald-300 block mb-0.5">Solo Real Human Mode (Recommended)</span>
+                    <span className="text-slate-400">
+                      0 simulated human requests will be generated. All entries in the live admin dashboard will belong strictly to you, with zero phantom human passes.
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setIncludeHumanTraffic(true)}
+                  className="text-xs shrink-0 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30"
                 >
-                  <option value="surge">Surge at open then tail</option>
-                  <option value="steady">Steady arrivals</option>
-                  <option value="waves">Periodic burst waves</option>
-                </select>
+                  Enable Control Group
+                </Button>
               </div>
+            ) : (
+              <div className="space-y-4 pt-2 border-t border-white/5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-mono">
+                  <div>
+                    <label className="text-slate-400 block mb-1">Human Attendees</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={5000}
+                      value={humanConfig.count}
+                      onChange={e => setHumanConfig({ ...humanConfig, count: Math.max(0, parseInt(e.target.value) || 0) })}
+                      className="w-full bg-surface-200 border border-white/10 rounded px-3 py-2 text-white font-mono"
+                    />
+                  </div>
 
-              <div>
-                <label className="text-slate-400 block mb-1">
-                  Fast Connection: {Math.round(humanConfig.fastConnectionSplit * 100)}%
-                </label>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.1}
-                  value={humanConfig.fastConnectionSplit}
-                  onChange={e => setHumanConfig({ ...humanConfig, fastConnectionSplit: parseFloat(e.target.value) })}
-                  className="w-full accent-emerald-400"
-                />
-                <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-                  <span>Slow (4G/WiFi)</span>
-                  <span>Fiber</span>
+                  <div>
+                    <label className="text-slate-400 block mb-1">Arrival Pattern</label>
+                    <select
+                      value={humanConfig.arrivalPattern}
+                      onChange={e => setHumanConfig({ ...humanConfig, arrivalPattern: e.target.value as any })}
+                      className="w-full bg-surface-200 border border-white/10 rounded px-3 py-2 text-white font-mono"
+                    >
+                      <option value="surge">Surge at open then tail</option>
+                      <option value="steady">Steady arrivals</option>
+                      <option value="waves">Periodic burst waves</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-slate-400 block mb-1">
+                      Fast Connection: {Math.round(humanConfig.fastConnectionSplit * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={humanConfig.fastConnectionSplit}
+                      onChange={e => setHumanConfig({ ...humanConfig, fastConnectionSplit: parseFloat(e.target.value) })}
+                      className="w-full accent-emerald-400"
+                    />
+                    <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                      <span>Slow (4G/WiFi)</span>
+                      <span>Fiber</span>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </Card>
         </div>
 

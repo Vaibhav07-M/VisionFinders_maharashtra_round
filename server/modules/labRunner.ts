@@ -337,45 +337,48 @@ export async function launchLabRun(params: {
   }
 
   // Prepare Human Traffic (Control Group)
-  const humanConfig = params.scenario.humanTraffic || { clientCount: 50, pattern: 'steady', fastConnectionRatio: 0.3, retryOnFailure: true };
-  const humanClients = Math.max(1, humanConfig.clientCount || 50);
+  const humanConfig = params.scenario.humanTraffic;
+  const isHumanEnabled = humanConfig && humanConfig.enabled !== false && (humanConfig.clientCount ?? 0) > 0;
+  const humanClients = isHumanEnabled ? Math.max(0, humanConfig.clientCount ?? 0) : 0;
   const totalDurationMs = Math.max(1, (params.scenario.durationSec || 15) * 1000);
 
-  for (let h = 0; h < humanClients; h++) {
-    plannedCount++;
-    const requestId = `req_${runId}_human_${h}`;
-    let delayMs = 0;
+  if (isHumanEnabled && humanClients > 0) {
+    for (let h = 0; h < humanClients; h++) {
+      plannedCount++;
+      const requestId = `req_${runId}_human_${h}`;
+      let delayMs = 0;
 
-    if (humanConfig.pattern === 'surge_tail') {
-      delayMs = Math.floor(Math.pow(rand(), 1.8) * totalDurationMs);
-    } else {
-      delayMs = Math.floor(rand() * totalDurationMs);
+      if (humanConfig.pattern === 'surge_tail') {
+        delayMs = Math.floor(Math.pow(rand(), 1.8) * totalDurationMs);
+      } else {
+        delayMs = Math.floor(rand() * totalDurationMs);
+      }
+
+      const isFast = rand() < (humanConfig.fastConnectionRatio || 0.3);
+      const speedClass = isFast ? 'fast' : 'slow';
+
+      attackRequests.push({
+        requestId,
+        groupId: 'human_control',
+        attackType: 'smart_bot', // uses normal behaviour
+        clientIdx: h,
+        delayMs,
+        isBot: false,
+        speedClass,
+        options: {},
+      });
+
+      groundTruthMap.set(requestId, {
+        runId,
+        requestId,
+        clientId: `human_user_${h}`,
+        isBot: false,
+        group: 'human_control',
+        profile: 'human',
+        speedClass,
+        scheduledAtMs: delayMs,
+      });
     }
-
-    const isFast = rand() < (humanConfig.fastConnectionRatio || 0.3);
-    const speedClass = isFast ? 'fast' : 'slow';
-
-    attackRequests.push({
-      requestId,
-      groupId: 'human_control',
-      attackType: 'smart_bot', // uses normal behaviour
-      clientIdx: h,
-      delayMs,
-      isBot: false,
-      speedClass,
-      options: {},
-    });
-
-    groundTruthMap.set(requestId, {
-      runId,
-      requestId,
-      clientId: `human_user_${h}`,
-      isBot: false,
-      group: 'human_control',
-      profile: 'human',
-      speedClass,
-      scheduledAtMs: delayMs,
-    });
   }
 
   // Sort requests deterministically by scheduled delay
@@ -451,6 +454,13 @@ async function executeRunnerLoop(
   const startLoopMs = Date.now();
   let completedCount = 0;
 
+  // Track active lab run for Admin Threat Radar
+  setActiveLabRun({
+    runId,
+    scenarioName: runner.scenario.name,
+    targetDropId,
+  });
+
   // Broadcast ticker every 1 second
   const ticker = setInterval(() => {
     if (runner.state === 'done' || runner.state === 'interrupted' || runner.state === 'failed') {
@@ -459,167 +469,192 @@ async function executeRunnerLoop(
     }
     const progress = getRunProgress(runId);
     if (progress && io) {
+      (io as any).to?.(`lab:${runId}`)?.emit?.('lab:progress', progress);
       (io as any).broadcastDropUpdate?.(targetDropId, { labProgress: progress });
     }
   }, 1000);
 
-  // Process requests in concurrent batches scheduled by delayMs
-  const BATCH_SIZE = 25;
-  for (let i = 0; i < requests.length; i += BATCH_SIZE) {
-    if (signal.aborted) {
-      runner.state = 'interrupted';
-      break;
+  // Send single HTTP join request helper
+  async function sendOneRequest(reqItem: any) {
+    if (signal.aborted) return;
+
+    runner.sentCount++;
+    const currentSec = Math.floor((Date.now() - startLoopMs) / 1000);
+
+    // Build generic client payload (NO BOT LABEL SENT TO SERVER)
+    const account = syntheticPool[reqItem.clientIdx % syntheticPool.length];
+    const idempotencyKey = `idemp_${reqItem.requestId}`;
+    
+    let nonce = 0;
+    if (reqItem.attackType === 'smart_bot' || !reqItem.isBot) {
+      nonce = solvePoW(`${targetDropId}:${account.uid}:${idempotencyKey}`, 2);
     }
 
-    const batch = requests.slice(i, i + BATCH_SIZE);
-    await Promise.all(
-      batch.map(async reqItem => {
-        if (signal.aborted) return;
+    const ip = reqItem.attackType === 'distributed_botnet'
+      ? `198.51.100.${10 + (reqItem.clientIdx % (reqItem.options.ipPoolSize || 100))}`
+      : (reqItem.attackType === 'naive_flooder' ? '192.0.2.1' : `203.0.113.${10 + (reqItem.clientIdx % 200)}`);
 
-        // Wait until scheduled delay
-        const targetElapsedMs = reqItem.delayMs;
-        const currentElapsedMs = Date.now() - startLoopMs;
-        const waitTime = targetElapsedMs - currentElapsedMs;
-        if (waitTime > 0) {
-          await new Promise(r => setTimeout(r, Math.min(waitTime, 1000)));
-        }
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Request-Id': reqItem.requestId,
+      'x-device-id': `dev_${reqItem.groupId}_${reqItem.clientIdx}`,
+      'X-Forwarded-For': ip,
+      'User-Agent': reqItem.isBot && reqItem.attackType === 'naive_flooder'
+        ? 'python-requests/2.28.1'
+        : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'x-client-jitter': reqItem.speedClass === 'superfast' ? '1' : '35',
+    };
 
-        if (signal.aborted) return;
+    // Attach authentication session if not unauthenticated spam
+    if (reqItem.attackType !== 'unauthenticated_spam') {
+      headers['x-session-id'] = account.token;
+      headers['Authorization'] = `Bearer ${account.token}`;
+      headers['x-user-uid'] = account.uid;
+    }
 
-        runner.sentCount++;
-        const currentSec = Math.floor((Date.now() - startLoopMs) / 1000);
+    const body: Record<string, any> = {
+      idempotencyKey,
+      nonce,
+      preferences: ['vip', 'platinum', 'gold'],
+    };
 
-        // Build generic client payload (NO BOT LABEL SENT TO SERVER)
-        const account = syntheticPool[reqItem.clientIdx % syntheticPool.length];
-        const idempotencyKey = `idemp_${reqItem.requestId}`;
-        
-        let nonce = 0;
-        if (reqItem.attackType === 'smart_bot' || !reqItem.isBot) {
-          nonce = solvePoW(`${targetDropId}:${account.uid}:${idempotencyKey}`, 2);
-        }
+    // Honeypot field sent only by naive flooder
+    if (reqItem.isBot && reqItem.attackType === 'naive_flooder') {
+      body['website_trap'] = 'honeypot_active';
+    }
 
-        const ip = reqItem.attackType === 'distributed_botnet'
-          ? `198.51.100.${10 + (reqItem.clientIdx % (reqItem.options.ipPoolSize || 100))}`
-          : (reqItem.attackType === 'naive_flooder' ? '192.0.2.1' : `203.0.113.${10 + (reqItem.clientIdx % 200)}`);
+    try {
+      const res = await fetch(`${targetUrl}/api/drops/${targetDropId}/join`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal,
+      });
 
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'X-Request-Id': reqItem.requestId,
-          'x-device-id': `dev_${reqItem.groupId}_${reqItem.clientIdx}`,
-          'X-Forwarded-For': ip,
-          'User-Agent': reqItem.isBot && reqItem.attackType === 'naive_flooder'
-            ? 'python-requests/2.28.1'
-            : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'x-client-jitter': reqItem.speedClass === 'superfast' ? '1' : '35',
-        };
+      const respBody = await res.json().catch(() => ({}));
+      completedCount++;
 
-        // Attach authentication session if not unauthenticated spam
-        if (reqItem.attackType !== 'unauthenticated_spam') {
-          headers['x-session-id'] = account.token;
-          headers['Authorization'] = `Bearer ${account.token}`;
-          headers['x-user-uid'] = account.uid;
-        }
+      // Look up defence event recorded by server middleware
+      const serverEvent = getDefenceEventByRequestId(reqItem.requestId);
+      let outcome: DefenceOutcome = 'ACCEPTED';
+      let reasonCode: DefenceReasonCode | undefined = undefined;
 
-        const body: Record<string, any> = {
-          idempotencyKey,
-          nonce,
-          preferences: ['vip', 'platinum', 'gold'],
-        };
-
-        // Honeypot field sent only by naive flooder
-        if (reqItem.isBot && reqItem.attackType === 'naive_flooder') {
-          body['website_trap'] = 'honeypot_active';
-        }
-
-        try {
-          const res = await fetch(`${targetUrl}/api/drops/${targetDropId}/join`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(body),
-            signal,
-          });
-
-          const respBody = await res.json().catch(() => ({}));
-          completedCount++;
-
-          // Look up defence event recorded by server middleware
-          const serverEvent = getDefenceEventByRequestId(reqItem.requestId);
-          let outcome: DefenceOutcome = 'ACCEPTED';
-          let reasonCode: DefenceReasonCode | undefined = undefined;
-
-          if (serverEvent) {
-            outcome = serverEvent.outcome;
-            reasonCode = serverEvent.reasonCode;
-            runner.serverOutcomes.set(reqItem.requestId, serverEvent);
+      if (serverEvent) {
+        outcome = serverEvent.outcome;
+        reasonCode = serverEvent.reasonCode;
+        runner.serverOutcomes.set(reqItem.requestId, serverEvent);
+      } else {
+        // Fallback from status
+        if (res.status === 201 || (res.status === 200 && !respBody?.isDuplicate)) {
+          outcome = 'ACCEPTED';
+        } else if (res.status === 200 && respBody?.isDuplicate) {
+          outcome = 'DUPLICATE_RECEIPT';
+          reasonCode = 'VALIDATION';
+        } else if (res.status === 429) {
+          outcome = 'RATE_LIMITED';
+          reasonCode = respBody?.code || 'RL_IP';
+        } else if (res.status === 403) {
+          if (respBody?.code === 'RISK_CHALLENGE') {
+            outcome = 'CHALLENGED';
+            reasonCode = 'RISK_CHALLENGE';
           } else {
-            // Fallback from status
-            if (res.status === 201 || (res.status === 200 && !respBody?.isDuplicate)) {
-              outcome = 'ACCEPTED';
-            } else if (res.status === 200 && respBody?.isDuplicate) {
-              outcome = 'DUPLICATE_RECEIPT';
-              reasonCode = 'VALIDATION';
-            } else if (res.status === 429) {
-              outcome = 'RATE_LIMITED';
-              reasonCode = respBody?.code || 'RL_IP';
-            } else if (res.status === 403) {
-              if (respBody?.code === 'RISK_CHALLENGE') {
-                outcome = 'CHALLENGED';
-                reasonCode = 'RISK_CHALLENGE';
-              } else {
-                outcome = 'BLOCKED';
-                reasonCode = respBody?.code || 'RISK_BLOCK';
-              }
-            } else if (res.status === 401) {
-              outcome = 'UNAUTHENTICATED';
-              reasonCode = respBody?.code || 'NO_SESSION';
-            } else {
-              outcome = 'INVALID';
-              reasonCode = respBody?.code || 'VALIDATION';
-            }
-
-            runner.serverOutcomes.set(reqItem.requestId, {
-              ts: Date.now(),
-              requestId: reqItem.requestId,
-              dropId: targetDropId,
-              outcome,
-              reasonCode,
-              statusCode: res.status,
-              latencyMs: 15,
-            });
+            outcome = 'BLOCKED';
+            reasonCode = respBody?.code || 'RISK_BLOCK';
           }
-
-          // Update timeline bucket
-          let timelineBucket = runner.timelinePerSecond.get(currentSec);
-          if (!timelineBucket) {
-            timelineBucket = { sent: 0, accepted: 0, rateLimited: 0, blocked: 0, challenged: 0, other: 0 };
-            runner.timelinePerSecond.set(currentSec, timelineBucket);
-          }
-          timelineBucket.sent++;
-          if (outcome === 'ACCEPTED') timelineBucket.accepted++;
-          else if (outcome === 'RATE_LIMITED') timelineBucket.rateLimited++;
-          else if (outcome === 'BLOCKED') timelineBucket.blocked++;
-          else if (outcome === 'CHALLENGED') timelineBucket.challenged++;
-          else timelineBucket.other++;
-
-          // Update recent request buffer (max 30 items)
-          runner.recentRequestsBuffer.unshift({
-            ts: Date.now(),
-            requestId: reqItem.requestId,
-            group: reqItem.groupId,
-            outcome,
-            reasonCode,
-            latencyMs: 15,
-          });
-          if (runner.recentRequestsBuffer.length > 30) {
-            runner.recentRequestsBuffer.pop();
-          }
-        } catch (fetchErr: any) {
-          if (fetchErr.name === 'AbortError') return;
-          completedCount++;
+        } else if (res.status === 401) {
+          outcome = 'UNAUTHENTICATED';
+          reasonCode = respBody?.code || 'NO_SESSION';
+        } else {
+          outcome = 'INVALID';
+          reasonCode = respBody?.code || 'VALIDATION';
         }
-      })
-    );
+
+        runner.serverOutcomes.set(reqItem.requestId, {
+          ts: Date.now(),
+          requestId: reqItem.requestId,
+          dropId: targetDropId,
+          outcome,
+          reasonCode,
+          statusCode: res.status,
+          latencyMs: 15,
+        });
+      }
+
+      // Update timeline bucket
+      let timelineBucket = runner.timelinePerSecond.get(currentSec);
+      if (!timelineBucket) {
+        timelineBucket = { sent: 0, accepted: 0, rateLimited: 0, blocked: 0, challenged: 0, other: 0 };
+        runner.timelinePerSecond.set(currentSec, timelineBucket);
+      }
+      timelineBucket.sent++;
+      if (outcome === 'ACCEPTED') timelineBucket.accepted++;
+      else if (outcome === 'RATE_LIMITED') timelineBucket.rateLimited++;
+      else if (outcome === 'BLOCKED') timelineBucket.blocked++;
+      else if (outcome === 'CHALLENGED') timelineBucket.challenged++;
+      else timelineBucket.other++;
+
+      // Update recent request buffer (max 30 items)
+      runner.recentRequestsBuffer.unshift({
+        ts: Date.now(),
+        requestId: reqItem.requestId,
+        group: reqItem.groupId,
+        outcome,
+        reasonCode,
+        latencyMs: 15,
+      });
+      if (runner.recentRequestsBuffer.length > 30) {
+        runner.recentRequestsBuffer.pop();
+      }
+    } catch (fetchErr: any) {
+      if (fetchErr.name === 'AbortError') return;
+      completedCount++;
+    }
   }
+
+  // Dispatch requests concurrently with high throughput
+  const CONCURRENCY = 40;
+  let activeInFlight = 0;
+  let nextIdx = 0;
+
+  await new Promise<void>((resolve) => {
+    function pump() {
+      if (signal.aborted || nextIdx >= requests.length) {
+        if (activeInFlight === 0) resolve();
+        return;
+      }
+
+      while (activeInFlight < CONCURRENCY && nextIdx < requests.length) {
+        if (signal.aborted) {
+          if (activeInFlight === 0) resolve();
+          return;
+        }
+
+        const reqItem = requests[nextIdx++];
+        const nowElapsed = Date.now() - startLoopMs;
+        const delay = Math.max(0, reqItem.delayMs - nowElapsed);
+
+        activeInFlight++;
+
+        setTimeout(async () => {
+          if (signal.aborted) {
+            activeInFlight--;
+            if (activeInFlight === 0 && nextIdx >= requests.length) resolve();
+            return;
+          }
+
+          try {
+            await sendOneRequest(reqItem);
+          } finally {
+            activeInFlight--;
+            pump();
+            if (activeInFlight === 0 && nextIdx >= requests.length) resolve();
+          }
+        }, delay);
+      }
+    }
+
+    pump();
+  });
 
   clearInterval(ticker);
   runner.endTimeMs = Date.now();

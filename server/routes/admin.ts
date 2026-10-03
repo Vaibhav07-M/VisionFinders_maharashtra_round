@@ -76,9 +76,13 @@ router.get('/dashboard', (req: Request, res: Response) => {
 
   const totalEntries = entries.length;
   const uniqueIdentities = new Set(entries.map(e => e.identityKey)).size;
-  const eligible = entries.filter(e => e.status === 'eligible' || e.status === 'selected').length;
+  const eligible = entries.filter(e => e.status === 'eligible' || e.status === 'selected' || e.status === 'entered').length;
   const flagged = entries.filter(e => e.status === 'flagged').length;
-  const blocked = entries.filter(e => e.status === 'blocked').length;
+  const blockedEntries = entries.filter(e => e.status === 'blocked').length;
+
+  // Real-time threat defense metrics for this drop (including bot attack blocks)
+  const threatSummary = getThreatSummary(dropId || 'drop-jack-white-vault');
+  const totalBlocked = blockedEntries + (threatSummary?.total?.blocked || 0) + (threatSummary?.total?.rateLimited || 0);
 
   const seatsSold = seats.filter(s => s.status === 'sold').length;
   const seatsHeld = seats.filter(s => s.status === 'held').length;
@@ -90,12 +94,12 @@ router.get('/dashboard', (req: Request, res: Response) => {
 
   // Dynamic alerts generated from real system conditions
   const alerts: Array<{ id: string; type: 'warning' | 'error' | 'info'; title: string; message: string; timestamp: number }> = [];
-  if (telemetry.total429Last60s > 10) {
+  if (telemetry.total429Last60s > 10 || threatSummary.lastMinute.rateLimited > 10) {
     alerts.push({
       id: 'alert-429-spike',
       type: 'warning',
       title: 'High Rate-Limiting Activity',
-      message: `Detected ${telemetry.total429Last60s} rate-limited (429) requests in the last 60 seconds.`,
+      message: `Detected ${Math.max(telemetry.total429Last60s, threatSummary.lastMinute.rateLimited)} rate-limited (429) requests in the last 60 seconds.`,
       timestamp: Date.now(),
     });
   }
@@ -108,12 +112,12 @@ router.get('/dashboard', (req: Request, res: Response) => {
       timestamp: Date.now(),
     });
   }
-  if (blocked > 0) {
+  if (totalBlocked > 0) {
     alerts.push({
       id: 'alert-blocked-entries',
       type: 'warning',
       title: 'Security Interventions Active',
-      message: `${blocked} participant entries have been intercepted and blocked for this drop.`,
+      message: `${totalBlocked} malicious bot attempts and invalid entries have been intercepted and blocked for this drop.`,
       timestamp: Date.now(),
     });
   }
@@ -140,13 +144,15 @@ router.get('/dashboard', (req: Request, res: Response) => {
       uniqueIdentities,
       eligible,
       flagged,
-      blocked,
-      rateLimitedLast60s: telemetry.total429Last60s,
+      blocked: totalBlocked,
+      rateLimitedLast60s: Math.max(telemetry.total429Last60s, threatSummary.lastMinute.rateLimited),
       seatsSold,
       seatsHeld,
       seatsAvailable,
       pendingAppeals,
+      threats: threatSummary,
     },
+    threats: threatSummary,
     telemetry,
     health: {
       uptimeSeconds: Math.floor(process.uptime()),
@@ -593,6 +599,25 @@ router.post('/drops/:id/entries/bulk', disallowReadOnly, (req: Request, res: Res
   });
 
   return res.json({ success: true, updatedCount, message: `Successfully updated ${updatedCount} entries.` });
+});
+
+// POST /api/admin/drops/:id/entries/clear-all - Discard all entries for this drop (testing convenience)
+router.post('/drops/:id/entries/clear-all', disallowReadOnly, (req: Request, res: Response) => {
+  const { id } = req.params;
+  const entries = db.list(`drops/${id}/entries`);
+  for (const entry of entries) {
+    db.delete(`drops/${id}/entries`, entry.id);
+  }
+  const dropDoc = db.get('drops', id);
+  if (dropDoc) {
+    db.set('drops', id, {
+      ...dropDoc.data,
+      totalEntriesCount: 0,
+      stats: { eligible: 0, flagged: 0 },
+    });
+  }
+  appendAuditRecord('ENTRIES_CLEARED', getActor(req), { dropId: id, clearedCount: entries.length });
+  return res.json({ success: true, message: `Cleared ${entries.length} entries for drop ${id}.`, clearedCount: entries.length });
 });
 
 // ==========================================

@@ -38,7 +38,7 @@ export const ThreatMonitor: React.FC<ThreatMonitorProps> = ({ dropId = 'drop-jac
     };
 
     fetchThreats();
-    const interval = setInterval(fetchThreats, 2500);
+    const interval = setInterval(fetchThreats, 1500);
 
     return () => {
       isMounted = false;

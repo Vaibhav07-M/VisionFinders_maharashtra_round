@@ -59,6 +59,7 @@ import { db } from './db/firestore';
 import { runSeed } from './seed';
 import adminRouter from './routes/admin';
 import { adminMetrics } from './modules/adminMetrics';
+import { defenceEventsMiddleware } from './modules/defenceEvents';
 
 dotenv.config();
 
@@ -132,6 +133,16 @@ const io = new SocketIOServer(server, {
   },
 });
 const realtime = setupRealtimeServer(io);
+
+// Lab Live Telemetry Socket Room Joining
+io.on('connection', socket => {
+  socket.on('lab:join', ({ runId }: { runId: string }) => {
+    if (runId) socket.join(`lab:${runId}`);
+  });
+  socket.on('lab:leave', ({ runId }: { runId: string }) => {
+    if (runId) socket.leave(`lab:${runId}`);
+  });
+});
 
 // Register socket broadcast for entries
 registerEntryListener((dropId, stats) => {
@@ -214,7 +225,7 @@ app.post('/api/drops/:id/waitlist/leave', authMiddleware, leaveWaitlistHandler);
 app.post('/api/admin/drops/:id/next-round', authMiddleware, requireRole(['organizer', 'security', 'evaluator']), openNextRoundHandler);
 
 // Drop Entry / Join Pipeline
-app.post('/api/drops/:id/join', authMiddleware, joinDropHandler);
+app.post('/api/drops/:id/join', defenceEventsMiddleware, authMiddleware, joinDropHandler);
 app.get('/api/drops/:id/entries/me', authMiddleware, getUserEntryHandler);
 
 // Draw Execution & Seed Reveal

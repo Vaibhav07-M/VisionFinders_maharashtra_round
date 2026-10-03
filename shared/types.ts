@@ -349,6 +349,7 @@ export interface LabAttackGroup {
 }
 
 export interface LabHumanTrafficConfig {
+  enabled?: boolean;
   clientCount: number;
   pattern: 'surge_tail' | 'steady' | 'waves';
   fastConnectionRatio: number; // 0 to 1 e.g. 0.3

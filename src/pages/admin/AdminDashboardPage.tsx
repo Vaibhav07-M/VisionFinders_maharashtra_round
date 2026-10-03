@@ -347,7 +347,7 @@ export const AdminDashboardPage: React.FC = () => {
         </ChartWrapper>
       </div>
 
-      <ThreatMonitor dropId={selectedDropId} />
+      <ThreatMonitor dropId={activeDropId} />
 
       {/* Operational Controls & Health Strip */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

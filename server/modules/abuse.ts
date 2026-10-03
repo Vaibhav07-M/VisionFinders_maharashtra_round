@@ -137,8 +137,8 @@ export function computeRiskScore(req: Request, powPassed: boolean): { score: num
   }
 
   const clientJitter = Number(req.headers['x-client-jitter'] || 0);
-  if (clientJitter < 5 && userAgent.includes('bot')) {
-    score += 25;
+  if (clientJitter > 0 && clientJitter < 10) {
+    score += 50;
     signals.push('ZERO_TIMING_JITTER_MACHINE_SPEED');
   }
 

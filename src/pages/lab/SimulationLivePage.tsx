@@ -91,16 +91,20 @@ export const SimulationLivePage: React.FC = () => {
 
     socket.on('lab:progress', handleProgress);
 
+    // Update run data from API response helper
+    const applyRunUpdate = (res: any) => {
+      const data = res?.progress || res?.run?.progress || res?.run;
+      if (mounted && data) {
+        setRunData(data);
+        setProgress(data);
+      }
+    };
+
     // Initial fetch of run details
     const fetchRunDetails = async () => {
       try {
         const res = await api.lab.getRun(activeRunId);
-        if (mounted && res.run) {
-          setRunData(res.run);
-          if (res.run.progress) {
-            setProgress(res.run.progress);
-          }
-        }
+        applyRunUpdate(res);
       } catch (err: any) {
         // ignore initial fetch error
       } finally {
@@ -114,12 +118,7 @@ export const SimulationLivePage: React.FC = () => {
     const interval = setInterval(async () => {
       try {
         const res = await api.lab.getRun(activeRunId);
-        if (mounted && res.run) {
-          setRunData(res.run);
-          if (res.run.progress) {
-            setProgress(res.run.progress);
-          }
-        }
+        applyRunUpdate(res);
       } catch (_) {}
     }, 1000);
 

@@ -82,8 +82,7 @@ export function recordDefenceEvent(event: DefenceEvent): void {
   recentEventsByRequestId.set(event.requestId, event);
   recentEventKeys.push(event.requestId);
 
-  // 2. Persist to DB under defenceEvents collection (batch/id)
-  db.set('defenceEvents', event.requestId, event);
+  // 2. High-speed in-memory map keeps all request outcomes with 0 cloud quota consumption
 
   // 3. Update ring buffer
   if (secondRingBuffer.length === 0 || secondRingBuffer[secondRingBuffer.length - 1].second !== sec) {
@@ -124,28 +123,41 @@ export function recordDefenceEvent(event: DefenceEvent): void {
 
   // 4. Update Drop Cumulative Stats
   if (event.dropId) {
-    const stats = getOrCreateDropStats(event.dropId);
-    stats.total++;
-    if (event.outcome === 'ACCEPTED' || event.outcome === 'DUPLICATE_RECEIPT') stats.accepted++;
-    else if (event.outcome === 'RATE_LIMITED') stats.rateLimited++;
-    else if (event.outcome === 'BLOCKED') stats.blocked++;
-    else if (event.outcome === 'CHALLENGED') stats.challenged++;
-
-    if (event.reasonCode) {
-      stats.reasons[event.reasonCode] = (stats.reasons[event.reasonCode] || 0) + 1;
+    const dropsToUpdate = [event.dropId];
+    if (event.dropId.startsWith('sandbox_')) {
+      const parts = event.dropId.split('_');
+      if (parts.length >= 3) {
+        const sourceDropId = parts.slice(2).join('_');
+        if (sourceDropId && !dropsToUpdate.includes(sourceDropId)) {
+          dropsToUpdate.push(sourceDropId);
+        }
+      }
     }
 
-    if (ipPrefix) {
-      const prev = stats.ipCounts[ipPrefix] || { count: 0, lastReason: event.reasonCode || 'NONE' };
-      stats.ipCounts[ipPrefix] = {
-        count: prev.count + 1,
-        lastReason: event.reasonCode || prev.lastReason,
-      };
-    }
+    for (const dId of dropsToUpdate) {
+      const stats = getOrCreateDropStats(dId);
+      stats.total++;
+      if (event.outcome === 'ACCEPTED' || event.outcome === 'DUPLICATE_RECEIPT') stats.accepted++;
+      else if (event.outcome === 'RATE_LIMITED') stats.rateLimited++;
+      else if (event.outcome === 'BLOCKED') stats.blocked++;
+      else if (event.outcome === 'CHALLENGED') stats.challenged++;
 
-    // Persist every 50 events or throttled
-    if (stats.total % 50 === 0) {
-      db.set('dropThreats', event.dropId, stats);
+      if (event.reasonCode) {
+        stats.reasons[event.reasonCode] = (stats.reasons[event.reasonCode] || 0) + 1;
+      }
+
+      if (ipPrefix) {
+        const prev = stats.ipCounts[ipPrefix] || { count: 0, lastReason: event.reasonCode || 'NONE' };
+        stats.ipCounts[ipPrefix] = {
+          count: prev.count + 1,
+          lastReason: event.reasonCode || prev.lastReason,
+        };
+      }
+
+      // Persist throttled
+      if (stats.total % 25 === 0) {
+        db.set('dropThreats', dId, stats);
+      }
     }
   }
 }
@@ -220,14 +232,15 @@ export function getThreatSummary(dropId?: string): LabThreatSummary {
  */
 export function defenceEventsMiddleware(req: Request, res: Response, next: NextFunction): void {
   // Only intercept POST /api/drops/:id/join
-  if (req.method !== 'POST' || !req.path.includes('/join')) {
+  const urlPath = req.originalUrl || req.path || '';
+  if (req.method !== 'POST' || !urlPath.includes('/join')) {
     return next();
   }
 
   const startMs = Date.now();
   const requestId = (req.headers['x-request-id'] as string) || `req_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
-  const dropIdMatch = req.path.match(/\/drops\/([^/]+)\/join/);
-  const dropId = dropIdMatch ? dropIdMatch[1] : (req.params.id || 'unknown');
+  const dropIdMatch = urlPath.match(/\/drops\/([^/?]+)\/join/);
+  const dropId = req.params?.id || (dropIdMatch ? dropIdMatch[1] : 'drop-jack-white-vault');
   const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
   const ipHash = sha256Sync(ip).slice(0, 16);
 
@@ -242,12 +255,14 @@ export function defenceEventsMiddleware(req: Request, res: Response, next: NextF
 
     if (statusCode === 201) {
       outcome = 'ACCEPTED';
+      reasonCode = 'ACCEPTED';
     } else if (statusCode === 200) {
       if (body?.isDuplicate) {
         outcome = 'DUPLICATE_RECEIPT';
-        reasonCode = 'VALIDATION';
+        reasonCode = 'DUPLICATE_RECEIPT';
       } else {
         outcome = 'ACCEPTED';
+        reasonCode = 'ACCEPTED';
       }
     } else if (statusCode === 429) {
       outcome = 'RATE_LIMITED';
@@ -264,8 +279,13 @@ export function defenceEventsMiddleware(req: Request, res: Response, next: NextF
       outcome = 'UNAUTHENTICATED';
       reasonCode = (body?.code as DefenceReasonCode) || 'NO_SESSION';
     } else if (statusCode === 400 || statusCode === 404) {
-      outcome = 'INVALID';
-      reasonCode = (body?.code as DefenceReasonCode) || (body?.error === 'INVALID_POW' ? 'POW_INVALID' : 'VALIDATION');
+      if (body?.code === 'POW_MISSING' || body?.code === 'POW_INVALID' || body?.error === 'INVALID_POW' || body?.error === 'POW_MISSING') {
+        outcome = 'BLOCKED';
+        reasonCode = (body?.code as DefenceReasonCode) || 'POW_INVALID';
+      } else {
+        outcome = 'INVALID';
+        reasonCode = (body?.code as DefenceReasonCode) || 'VALIDATION';
+      }
     } else if (statusCode >= 500) {
       outcome = 'SERVER_ERROR';
     }

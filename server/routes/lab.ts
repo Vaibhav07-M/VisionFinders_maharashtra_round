@@ -79,7 +79,7 @@ router.get('/runs/:runId', (req: Request, res: Response) => {
   if (!progress) {
     return res.status(404).json({ error: 'RUN_NOT_FOUND', message: 'Simulation run not found.' });
   }
-  return res.json({ progress });
+  return res.json({ success: true, progress, run: progress });
 });
 
 // POST /api/lab/runs/:runId/stop (Abort within 2 seconds)
