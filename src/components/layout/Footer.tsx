@@ -1,97 +1,56 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldCheck, Cpu, GitBranch, Lock } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   return (
-    <footer className="border-t border-white/10 bg-[#090a0f] text-slate-400 text-xs py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
+    <footer className="border-t border-white/[0.08] bg-[#07080d] text-slate-400 text-xs py-8 px-4 sm:px-6 lg:px-8 font-sans">
+      <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 sm:pl-28">
         
-        {/* Mandatory Official Scale & Claims Statement */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 rounded-2xl bg-[#12141c]/60 border border-white/10">
-          <div>
-            <div className="flex items-center gap-2 text-brand-yellow font-display font-bold text-sm mb-1.5">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Core Allocation Integrity Claim</span>
-            </div>
-            <p className="text-slate-300 leading-relaxed italic">
-              "Fair Drop removes arrival speed and request volume as direct allocation advantages and measures the remaining effects of adversarial behaviour."
-            </p>
+        {/* Brand & Copyright */}
+        <div className="flex items-center gap-3">
+          <div className="w-7 h-7 rounded-lg bg-brand-yellow flex items-center justify-center font-stamp font-black text-black text-sm shadow-glow-yellow/20">
+            FD
           </div>
-
           <div>
-            <div className="flex items-center gap-2 text-cyan-400 font-display font-bold text-sm mb-1.5">
-              <Cpu className="w-4 h-4" />
-              <span>50k Virtual Client Scale Statement</span>
+            <div className="flex items-center gap-2">
+              <span className="font-stamp text-xs font-black tracking-wider text-white uppercase">
+                FAIR DROP
+              </span>
+              <span className="text-[10px] font-mono text-slate-400">
+                © 2026
+              </span>
             </div>
-            <p className="text-slate-300 leading-relaxed">
-              "The application is real. The 50,000 users are virtual clients run against a local or staged instance with the Firebase Emulator, because free hosting and the Firebase Spark plan have connection and write limits."
+            <p className="text-[11px] text-slate-400">
+              Verifiable high-demand ticket allocation engine.
             </p>
           </div>
         </div>
 
-        {/* Footer Navigation Columns */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-8">
-          <div>
-            <h4 className="font-display font-bold text-white uppercase tracking-wider mb-3 text-[11px]">
-              Panel A · Attendee
-            </h4>
-            <ul className="space-y-2">
-              <li><Link to="/" className="hover:text-brand-yellow transition-colors">Drops Catalog</Link></li>
-              <li><Link to="/drops/drop-jack-white-vault" className="hover:text-brand-yellow transition-colors">Featured Drop</Link></li>
-              <li><Link to="/verify" className="hover:text-brand-yellow transition-colors">Identity Verification</Link></li>
-              <li><Link to="/me" className="hover:text-brand-yellow transition-colors">My Signed Tickets</Link></li>
-              <li><Link to="/proof/drop-jack-white-vault" className="hover:text-brand-yellow transition-colors">Cryptographic Proof Explorer</Link></li>
-            </ul>
-          </div>
+        {/* Minimal Quick Links */}
+        <nav className="flex flex-wrap items-center justify-center gap-5 text-[11px] text-slate-400">
+          <Link to="/drops/drop-jack-white-vault" className="hover:text-brand-yellow transition-colors">
+            Featured Drop
+          </Link>
+          <Link to="/proof/drop-jack-white-vault" className="hover:text-brand-yellow transition-colors">
+            Proof Explorer
+          </Link>
+          <Link to="/lab/attack-designer" className="hover:text-rose-400 transition-colors">
+            Adversarial Lab
+          </Link>
+          <Link to="/admin" className="hover:text-brand-yellow transition-colors">
+            Admin
+          </Link>
+        </nav>
 
-          <div>
-            <h4 className="font-display font-bold text-white uppercase tracking-wider mb-3 text-[11px]">
-              Panel B · Organizer / Admin
-            </h4>
-            <ul className="space-y-2">
-              <li><Link to="/admin" className="hover:text-brand-yellow transition-colors">Operations Dashboard</Link></li>
-              <li><Link to="/admin/drops/create" className="hover:text-brand-yellow transition-colors">Create / Configure Drop</Link></li>
-              <li><Link to="/admin/inventory" className="hover:text-brand-yellow transition-colors">500-Seat Auditorium Map</Link></li>
-              <li><Link to="/admin/entries" className="hover:text-brand-yellow transition-colors">Risk Scoring & Entries</Link></li>
-              <li><Link to="/admin/live" className="hover:text-brand-yellow transition-colors">Live Rate-Limit Radar</Link></li>
-              <li><Link to="/admin/audit" className="hover:text-brand-yellow transition-colors">Append-Only Audit Hash Chain</Link></li>
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-display font-bold text-rose-400 uppercase tracking-wider mb-3 text-[11px]">
-              Panel C · Adversarial Lab
-            </h4>
-            <ul className="space-y-2">
-              <li><Link to="/lab/attack-designer" className="hover:text-rose-300 transition-colors">Bot Attack Designer</Link></li>
-              <li><Link to="/lab/simulation-live" className="hover:text-rose-300 transition-colors">Live 50k Funnel & Chaos</Link></li>
-              <li><Link to="/lab/matrix" className="hover:text-rose-300 transition-colors">Experiment Matrix (N-Trials)</Link></li>
-              <li><Link to="/lab/report" className="hover:text-rose-300 transition-colors">Fairness Measurement Report</Link></li>
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-display font-bold text-white uppercase tracking-wider mb-3 text-[11px]">
-              Cryptographic Guarantees
-            </h4>
-            <ul className="space-y-2 text-slate-400">
-              <li className="flex items-center gap-1.5"><Lock className="w-3.5 h-3.5 text-brand-yellow" /> SHA-256 Commit-Reveal</li>
-              <li className="flex items-center gap-1.5"><GitBranch className="w-3.5 h-3.5 text-cyan-400" /> Fisher-Yates Permutation</li>
-              <li className="flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Idempotent Entry Receipts</li>
-              <li className="flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-purple-400" /> Zero Oversell Invariant</li>
-            </ul>
-          </div>
-        </div>
-
-        <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-slate-500">
-          <div>
-            © 2026 Fair Drop Architecture · Verified Random Allocation Engine
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="font-mono text-brand-yellow">SEED_HASH: e3b0c44...855</span>
-            <span className="font-mono text-emerald-400">INVENTORY_INVARIANT: 0 OVERSELL</span>
-          </div>
+        {/* Status Indicators */}
+        <div className="flex items-center gap-2 font-mono text-[10px]">
+          <span className="px-2.5 py-1 rounded-full bg-white/[0.03] border border-white/10 text-slate-300">
+            SHA-256 Commit-Reveal
+          </span>
+          <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            0 Oversell
+          </span>
         </div>
 
       </div>

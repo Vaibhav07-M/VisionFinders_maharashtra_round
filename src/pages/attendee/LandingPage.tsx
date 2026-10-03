@@ -6,9 +6,6 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Countdown } from '@/components/ui/Countdown';
 import {
-  ShieldCheck,
-  Sparkles,
-  ZapOff,
   Flame,
   Search,
   ArrowRight,
@@ -56,34 +53,24 @@ export const LandingPage: React.FC = () => {
   return (
     <div className="space-y-16 pb-20">
       
-      {/* Hero Section */}
-      <section className="relative pt-8 sm:pt-16 pb-12 overflow-hidden">
+      {/* Hero Section: Minimal, Clean, Centered with Generous Whitespace */}
+      <section className="relative py-20 sm:py-28 lg:py-32 flex flex-col items-center justify-center text-center overflow-hidden">
         {/* Ambient background glow */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-brand-yellow/10 rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[300px] bg-brand-yellow/10 rounded-full blur-[140px] pointer-events-none" />
 
-        <div className="relative max-w-5xl mx-auto text-center space-y-6 px-4">
+        <div className="relative max-w-4xl mx-auto space-y-8 px-4 flex flex-col items-center">
           
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-yellow/10 border border-brand-yellow/30 text-brand-yellow text-xs font-mono tracking-wide uppercase shadow-glow-yellow/20">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Verifiable Anti-Bot High-Demand Registration</span>
-          </div>
-
-          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-stamp font-black text-white tracking-tight uppercase leading-[0.95]">
-            NO BOT ADVANTAGE.<br />
-            NO SPEED WAR.<br />
-            <span className="text-brand-yellow underline decoration-white/20 underline-offset-8">
-              UNIFORM RANDOM DRAW.
-            </span>
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-stamp font-black text-white tracking-tight uppercase leading-[1.08]">
+            No bots. No speed war.<br />
+            <span className="text-brand-yellow">Uniform random draw.</span>
           </h1>
 
-          <p className="max-w-2xl mx-auto text-base sm:text-lg text-slate-300 leading-relaxed font-sans">
-            Fair Drop eliminates millisecond snipers, distributed proxy botnets, and request flooding.
-            Verified identities register during a protected window; seats are awarded via an open,
-            cryptographically committed Fisher-Yates draw.
+          <p className="max-w-xl mx-auto text-base sm:text-lg text-slate-300 font-sans leading-relaxed">
+            Fair, verifiable ticket allocation with zero speed bias and cryptographically proven random draws.
           </p>
 
-          {/* Quick CTA Actions */}
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          {/* 2 Clean CTA Actions */}
+          <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
             <Link to={`/drops/${featuredDrop.id}`}>
               <Button size="lg" variant="primary" rightIcon={<ArrowRight className="w-4 h-4" />}>
                 Join Live Drop Now
@@ -91,47 +78,27 @@ export const LandingPage: React.FC = () => {
             </Link>
             <Link to="/proof/drop-jack-white-vault">
               <Button size="lg" variant="outline" leftIcon={<Lock className="w-4 h-4 text-brand-yellow" />}>
-                Verify Cryptographic Proof
-              </Button>
-            </Link>
-            <Link to="/lab/attack-designer">
-              <Button size="lg" variant="secondary" leftIcon={<ZapOff className="w-4 h-4 text-rose-400" />}>
-                Adversarial Lab & Metrics
+                Verify Proof
               </Button>
             </Link>
           </div>
 
-          {/* 3 Pillar Guarantee Badges */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-8 max-w-4xl mx-auto">
-            <div className="p-4 rounded-xl bg-surface-100/60 border border-white/10 text-left">
-              <div className="text-brand-yellow font-display font-bold text-sm flex items-center gap-2">
-                <ClockIcon className="w-4 h-4" />
-                <span>Zero Speed Bias</span>
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                Entering at T=0.001s gives exactly the same odds as entering 2 minutes later.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl bg-surface-100/60 border border-white/10 text-left">
-              <div className="text-emerald-400 font-display font-bold text-sm flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4" />
-                <span>1 Identity = 1 Entry</span>
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                Idempotent receipts ensure retries and spam requests yield the identical draw receipt.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl bg-surface-100/60 border border-white/10 text-left">
-              <div className="text-cyan-400 font-display font-bold text-sm flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4" />
-                <span>Commit-Reveal Shuffle</span>
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                Seed hash published beforehand. Anyone can re-verify their draw rank in the browser.
-              </p>
-            </div>
+          {/* Thin, single-line row of 3 short labels */}
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 pt-6 text-xs font-mono text-slate-400">
+            <span className="inline-flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-yellow" />
+              <span>Zero Speed Bias</span>
+            </span>
+            <span className="text-white/20 hidden sm:inline">•</span>
+            <span className="inline-flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              <span>1 Identity = 1 Entry</span>
+            </span>
+            <span className="text-white/20 hidden sm:inline">•</span>
+            <span className="inline-flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+              <span>Commit-Reveal Shuffle</span>
+            </span>
           </div>
 
         </div>
