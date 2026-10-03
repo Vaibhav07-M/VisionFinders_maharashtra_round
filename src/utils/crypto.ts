@@ -44,21 +44,21 @@ export function deterministicFisherYates<T>(array: T[], seed: string): T[] {
 
 // Proof-of-Work Solver (Client-side)
 export async function solvePoW(challenge: string, difficulty: number): Promise<{ nonce: number; hash: string; iterations: number }> {
-  // Ensure difficulty is responsive on all machines (< 50ms)
-  const safeDifficulty = Math.max(1, Math.min(difficulty, 3));
+  // Solve for target difficulty (up to 4 hex zeros)
+  const safeDifficulty = Math.max(1, Math.min(difficulty, 4));
   const prefix = '0'.repeat(safeDifficulty);
   let nonce = 0;
   let lastYield = Date.now();
 
-  while (nonce < 15000) {
+  while (nonce < 150000) {
     const testString = `${challenge}:${nonce}`;
     const hash = await sha256(testString);
     if (hash.startsWith(prefix)) {
       return { nonce, hash, iterations: nonce + 1 };
     }
     nonce++;
-    // Yield to the main thread every 25 iterations or 8ms to guarantee buttery-smooth 60fps UI
-    if (nonce % 25 === 0 && Date.now() - lastYield > 8) {
+    // Yield to the main thread every 50 iterations or 12ms to guarantee responsive UI
+    if (nonce % 50 === 0 && Date.now() - lastYield > 12) {
       await new Promise(r => setTimeout(r, 0));
       lastYield = Date.now();
     }

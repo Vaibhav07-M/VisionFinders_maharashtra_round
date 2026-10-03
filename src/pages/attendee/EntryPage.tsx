@@ -47,6 +47,13 @@ export const EntryPage: React.FC = () => {
   const [entryReceipt, setEntryReceipt] = useState(existingEntry || null);
   const [duplicateTestCount, setDuplicateTestCount] = useState(0);
 
+  // Sync existing entry from database if already entered
+  useEffect(() => {
+    if (existingEntry && !entryReceipt) {
+      setEntryReceipt(existingEntry);
+    }
+  }, [existingEntry, entryReceipt]);
+
   // Simulated challenge simulation mode toggles for demonstration
   const [simulatedState, setSimulatedState] = useState<'normal' | 'rate_limited' | 'challenged' | 'blocked'>('normal');
 

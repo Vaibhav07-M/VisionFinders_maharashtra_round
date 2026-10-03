@@ -189,7 +189,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ]);
 
           if (seatsRes.seats) setSeats(seatsRes.seats);
-          if (entriesRes.entries) setEntries(entriesRes.entries);
+          if (entriesRes.entries) {
+            const list = [...entriesRes.entries];
+            if (userEntryRes.entry && !list.some(e => e.identityKey === userEntryRes.entry?.identityKey)) {
+              list.push(userEntryRes.entry);
+            }
+            setEntries(list);
+          } else if (userEntryRes.entry) {
+            setEntries([userEntryRes.entry]);
+          }
           if (userEntryRes.reservation) setActiveReservation(userEntryRes.reservation);
         }
       }
@@ -391,8 +399,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         );
       } else {
         addToast('success', 'Entry Confirmed', `Receipt ${res.entry.receiptId} issued and committed to Firestore.`);
-        setEntries(prev => [res.entry, ...prev.filter(e => e.identityKey !== res.entry.identityKey)]);
       }
+      setEntries(prev => [res.entry, ...prev.filter(e => e.identityKey !== res.entry.identityKey)]);
 
       // Refresh drop info and audit log
       api.drops.get(dropId).then(d => setDrops(prev => prev.map(item => item.id === dropId ? d.drop : item)));
