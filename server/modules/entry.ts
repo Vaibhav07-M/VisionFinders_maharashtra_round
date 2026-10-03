@@ -83,7 +83,8 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   // 5. PROOF-OF-WORK VERIFICATION
   const { nonce, idempotencyKey } = req.body;
   const challenge = `${dropId}:${userUid}:${idempotencyKey}`;
-  const powValid = verifyPoW(challenge, Number(nonce || 0), drop.defenceConfig?.powDifficulty ?? 2);
+  const effectiveDifficulty = Math.min(drop.defenceConfig?.powDifficulty ?? 2, 3);
+  const powValid = verifyPoW(challenge, Number(nonce || 0), effectiveDifficulty);
 
   if (drop.defenceConfig?.powEnabled && !powValid) {
     return res.status(400).json({
