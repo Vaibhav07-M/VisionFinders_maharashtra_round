@@ -2,7 +2,6 @@ import { db, sha256Sync } from './db/firestore';
 import { hashPassword } from './modules/auth';
 import { INITIAL_SAMPLE_DROPS, DEFAULT_DEFENCE_CONFIG } from '../shared/constants';
 import { Seat, Drop, Appeal, AuditRecord } from '../shared/types';
-import { computeTrialForConfig } from './modules/simulation';
 import { DEFAULT_SECURITY_CONFIG } from './modules/abuse';
 import { appendAuditRecord } from './modules/audit';
 import { ensureActiveWindow } from './modules/drops';
@@ -148,36 +147,6 @@ export function runSeed() {
     mode: 'FAIR_DROP',
   });
   console.log(`[SEED] Seeded genesis audit log record.`);
-
-  // 7. Seed Initial Simulation Runs for Lab & Matrix
-  const defaultSim = computeTrialForConfig({
-    scenarioName: 'Standard 50,000 Client Benchmark',
-    totalUsers: 50000,
-    botSharePercentage: 30,
-    selectedProfiles: ['fast_single_shot', 'distributed_botnet'],
-    requestsPerSecPerBot: 50,
-    retriesPerBot: 3,
-    ipPoolSize: 2000,
-    accountsPerOperator: 10,
-    mode: 'FAIR_DROP',
-    trialCount: 5,
-    randomSeed: 'SEED_INITIAL_BENCHMARK',
-    defences: {
-      turnstileEnabled: true,
-      powEnabled: true,
-      powDifficulty: 2,
-      honeypotEnabled: true,
-      rateLimitPerIp: 20,
-      rateLimitPerAccount: 60,
-      rateLimitPerDevice: 60,
-      timingJitterCheck: true,
-      riskScoringEnabled: true,
-      minRiskBlockScore: 80,
-      minRiskChallengeScore: 50,
-    },
-  });
-  db.set('simulationRuns', defaultSim.trial.trialId, defaultSim.comparison);
-  console.log(`[SEED] Seeded initial simulation comparison in 'simulationRuns'.`);
 
   console.log('[SEED] Database seeding completed successfully.');
 }

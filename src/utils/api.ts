@@ -205,8 +205,6 @@ export const api = {
       idempotencyKey?: string;
       website_trap?: string;
       preferences?: string[];
-      isBot?: boolean;
-      speedClass?: string;
     }) =>
       request<{ isDuplicate: boolean; entry: DropEntry; message?: string }>(`/drops/${dropId}/join`, {
         method: 'POST',
@@ -255,7 +253,7 @@ export const api = {
       }),
   },
 
-  // Security Rules
+  // Security Rules & Threat Telemetry
   security: {
     getRules: () => request<{ config: SecurityConfig }>('/security/rules'),
     updateRules: (updates: Partial<SecurityConfig>) =>
@@ -265,16 +263,64 @@ export const api = {
       }),
   },
 
-  // Simulation Lab
-  simulation: {
-    run: (config: SimulationConfig) =>
-      request<{ trial: SimulationTrialResult; comparison: FairnessComparisonReport }>('/simulation/run', {
+  // Real Adversarial Lab Engine
+  lab: {
+    provisionAccounts: (count: number) =>
+      request<{ success: boolean; count: number; accounts: any[] }>('/lab/provision-accounts', {
+        method: 'POST',
+        body: JSON.stringify({ count }),
+      }),
+    startRun: (config: any) =>
+      request<{ success: boolean; runId: string; message: string; targetMode: string }>('/lab/runs', {
         method: 'POST',
         body: JSON.stringify(config),
       }),
-    getLatest: () => request<{ report: FairnessComparisonReport }>('/simulation/latest'),
-    getRuns: () => request<{ runs: FairnessComparisonReport[]; count: number }>('/simulation/runs'),
-    getMatrix: () => request<{ matrix: any[]; count: number }>('/simulation/matrix'),
+    getRuns: () =>
+      request<{ success: boolean; count: number; runs: any[] }>('/lab/runs'),
+    getRun: (runId: string) =>
+      request<{ success: boolean; run: any }>('/lab/runs/' + runId),
+    stopRun: (runId: string) =>
+      request<{ success: boolean; message: string }>('/lab/runs/' + runId + '/stop', {
+        method: 'POST',
+      }),
+    getReport: (runId: string) =>
+      request<{ success: boolean; report: any }>('/lab/runs/' + runId + '/report'),
+    purgeRun: (runId: string) =>
+      request<{ success: boolean; message: string; invariants: any }>('/lab/runs/' + runId + '/purge', {
+        method: 'POST',
+      }),
+    chaosDisconnect: () =>
+      request<{ success: boolean; message: string; recoveryMs: number }>('/lab/chaos/disconnect', {
+        method: 'POST',
+      }),
+    getThreats: (dropId?: string) =>
+      request<{ success: boolean; threatSummary: any }>(`/admin/threats${dropId ? `?dropId=${dropId}` : ''}`),
+  },
+
+  // Legacy simulation shim for backward compatibility during migration
+  simulation: {
+    run: async (config: any) => {
+      const res = await request<{ success: boolean; runId: string }>('/lab/runs', {
+        method: 'POST',
+        body: JSON.stringify(config),
+      });
+      return { trial: {} as any, comparison: {} as any, runId: res.runId };
+    },
+    getLatest: async () => {
+      const runsRes = await request<{ runs: any[] }>('/lab/runs');
+      const latest = runsRes.runs?.[0];
+      if (!latest) return { report: null as any };
+      const reportRes = await request<{ report: any }>('/lab/runs/' + latest.id + '/report');
+      return { report: reportRes.report };
+    },
+    getRuns: async () => {
+      const res = await request<{ runs: any[]; count: number }>('/lab/runs');
+      return { runs: res.runs, count: res.count };
+    },
+    getMatrix: async () => {
+      const res = await request<{ runs: any[] }>('/lab/runs');
+      return { matrix: res.runs || [], count: res.runs?.length || 0 };
+    },
   },
 
   // Audit Log & Invariants

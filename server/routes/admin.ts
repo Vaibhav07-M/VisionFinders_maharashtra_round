@@ -6,6 +6,7 @@ import { appendAuditRecord, verifyAuditHashChain } from '../modules/audit';
 import { runSystemInvariantCheck } from '../modules/invariants';
 import { getSecurityConfig, applySecurityConfig, activeBlocklist, ipLimiter } from '../modules/abuse';
 import { adminMetrics } from '../modules/adminMetrics';
+import { getThreatSummary } from '../modules/defenceEvents';
 import { Drop, DropEntry, Seat, Appeal } from '../../shared/types';
 
 const router = express.Router();
@@ -157,6 +158,13 @@ router.get('/dashboard', (req: Request, res: Response) => {
     alerts,
     recentActivity,
   });
+});
+
+// GET /api/admin/threats?dropId= - Live threat telemetry for ThreatMonitor widget
+router.get('/threats', (req: Request, res: Response) => {
+  const dropId = (req.query.dropId as string) || 'drop-jack-white-vault';
+  const threats = getThreatSummary(dropId);
+  return res.json({ ...threats, success: true, threatSummary: threats });
 });
 
 // ==========================================

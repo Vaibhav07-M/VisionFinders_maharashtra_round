@@ -75,11 +75,14 @@ const AppContent: React.FC = () => {
           </Route>
 
           {/* Panel C: Adversarial Lab (4 pages) */}
-          <Route path="/lab" element={<Navigate to="/lab/attack-designer" replace />} />
-          <Route path="/lab/attack-designer" element={<AttackDesignerPage />} />
+          <Route path="/lab" element={<AttackDesignerPage />} />
+          <Route path="/lab/attack-designer" element={<Navigate to="/lab" replace />} />
+          <Route path="/lab/runs/:runId/live" element={<SimulationLivePage />} />
           <Route path="/lab/simulation-live" element={<SimulationLivePage />} />
-          <Route path="/lab/matrix" element={<ExperimentMatrixPage />} />
+          <Route path="/lab/runs/:runId/report" element={<FairnessReportPage />} />
           <Route path="/lab/report" element={<FairnessReportPage />} />
+          <Route path="/lab/compare" element={<ExperimentMatrixPage />} />
+          <Route path="/lab/matrix" element={<Navigate to="/lab/compare" replace />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

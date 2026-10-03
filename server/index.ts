@@ -47,12 +47,8 @@ import {
   getSecurityRulesHandler,
   updateSecurityRulesHandler,
 } from './modules/abuse';
-import {
-  runSimulationApiHandler,
-  getLatestSimulationHandler,
-  listSimulationRunsHandler,
-  getExperimentMatrixHandler,
-} from './modules/simulation';
+import labRouter from './routes/lab';
+import { defenceEventsMiddleware } from './modules/defenceEvents';
 import { setupRealtimeServer } from './modules/realtime';
 import { healthHandler, metricsHandler } from './modules/health';
 import { metricsCollector } from './modules/metrics';
@@ -96,11 +92,13 @@ app.use(cors({
     'x-user-email',
     'x-device-id',
     'x-client-jitter',
+    'x-request-id',
   ],
   credentials: true,
 }));
 
 app.use(express.json());
+app.use(defenceEventsMiddleware);
 
 // Injected Latency & Telemetry Middleware
 app.use(async (req, res, next) => {
@@ -237,11 +235,8 @@ app.post('/api/appeals/:id/decide', authMiddleware, requireRole(['organizer', 's
 app.get('/api/security/rules', getSecurityRulesHandler);
 app.post('/api/security/rules', authMiddleware, requireRole(['security', 'evaluator']), updateSecurityRulesHandler);
 
-// Simulation API & Lab Reports
-app.post('/api/simulation/run', runSimulationApiHandler);
-app.get('/api/simulation/latest', getLatestSimulationHandler);
-app.get('/api/simulation/runs', listSimulationRunsHandler);
-app.get('/api/simulation/matrix', getExperimentMatrixHandler);
+// Adversarial Lab API Router
+app.use('/api/lab', labRouter);
 
 // Audit Hash Chain & Ledger Verification
 app.get('/api/audit', (req, res) => {

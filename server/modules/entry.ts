@@ -46,6 +46,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   if (activeBlocklist.has(ip)) {
     return res.status(403).json({
       error: 'IP_BLOCKED',
+      code: 'BLOCKLIST',
       message: 'Access denied: IP is present on security blocklist.',
     });
   }
@@ -53,12 +54,33 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   // 2. RATE LIMIT CHECKS (IP, Account, Device)
   try {
     await ipLimiter.consume(ip);
-    await accountLimiter.consume(userUid);
-    await deviceLimiter.consume(clientDeviceId);
-  } catch (rateLimitRejection) {
+  } catch (err) {
     return res.status(429).json({
       error: 'RATE_LIMITED',
-      message: 'Too many requests. Request rate exceeds safe threshold.',
+      code: 'RL_IP',
+      message: 'Too many requests from this IP address.',
+      retryAfterSeconds: 15,
+    });
+  }
+
+  try {
+    await accountLimiter.consume(userUid);
+  } catch (err) {
+    return res.status(429).json({
+      error: 'RATE_LIMITED',
+      code: 'RL_ACCOUNT',
+      message: 'Too many requests for this account.',
+      retryAfterSeconds: 15,
+    });
+  }
+
+  try {
+    await deviceLimiter.consume(clientDeviceId);
+  } catch (err) {
+    return res.status(429).json({
+      error: 'RATE_LIMITED',
+      code: 'RL_DEVICE',
+      message: 'Too many requests from this device.',
       retryAfterSeconds: 15,
     });
   }
@@ -66,22 +88,29 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   // 3. DROP STATUS & WINDOW VALIDATION
   const dropDoc = db.get('drops', dropId);
   if (!dropDoc) {
-    return res.status(404).json({ error: 'DROP_NOT_FOUND', message: 'Drop event does not exist.' });
+    return res.status(404).json({ error: 'DROP_NOT_FOUND', code: 'VALIDATION', message: 'Drop event does not exist.' });
   }
   const drop = dropDoc.data as Drop;
   if (drop.status !== 'open') {
-    return res.status(400).json({ error: 'DROP_NOT_OPEN', message: `Drop registration is currently ${drop.status}.` });
+    return res.status(400).json({ error: 'DROP_NOT_OPEN', code: 'WINDOW_CLOSED', message: `Drop registration is currently ${drop.status}.` });
   }
 
   // 4. HONEYPOT TRAP CHECK
   const honeypotVal = req.body.website_trap || '';
   if (honeypotVal.length > 0) {
     appendAuditRecord('HONEYPOT_TRIGGERED', userUid, { ip, dropId });
-    return res.status(403).json({ error: 'BOT_DETECTED', message: 'Automated agent honeypot triggered.' });
+    return res.status(403).json({ error: 'BOT_DETECTED', code: 'HONEYPOT', message: 'Automated agent honeypot triggered.' });
   }
 
   // 5. PROOF-OF-WORK VERIFICATION
   const { nonce, idempotencyKey } = req.body;
+  if (drop.defenceConfig?.powEnabled && (nonce === undefined || nonce === null)) {
+    return res.status(400).json({
+      error: 'POW_MISSING',
+      code: 'POW_MISSING',
+      message: 'Proof of work nonce is missing.',
+    });
+  }
   const challenge = `${dropId}:${userUid}:${idempotencyKey}`;
   const effectiveDifficulty = Math.min(drop.defenceConfig?.powDifficulty ?? 2, 3);
   const powValid = verifyPoW(challenge, Number(nonce || 0), effectiveDifficulty);
@@ -89,6 +118,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   if (drop.defenceConfig?.powEnabled && !powValid) {
     return res.status(400).json({
       error: 'INVALID_POW',
+      code: 'POW_INVALID',
       message: 'Cryptographic proof-of-work challenge failed or incomplete.',
     });
   }
@@ -98,6 +128,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   if (drop.defenceConfig?.riskScoringEnabled && riskScore >= (drop.defenceConfig?.minRiskBlockScore ?? 80)) {
     return res.status(403).json({
       error: 'RISK_SCORE_EXCEEDED',
+      code: 'RISK_BLOCK',
       message: 'Entry blocked by automated behavioral risk evaluation.',
       riskScore,
       signals,
@@ -110,6 +141,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   if (existingReceiptDoc) {
     return res.json({
       isDuplicate: true,
+      code: 'DUPLICATE_RECEIPT',
       entry: existingReceiptDoc.data,
       message: 'Idempotent response: Returning existing valid entry receipt.',
     });
@@ -123,6 +155,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   if (existingEntry) {
     return res.json({
       isDuplicate: true,
+      code: 'DUPLICATE_RECEIPT',
       entry: existingEntry.data,
       message: 'One identity = one entry. Returning existing registered receipt.',
     });
@@ -156,8 +189,6 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
     riskScore,
     status: riskScore >= (drop.defenceConfig?.minRiskChallengeScore ?? 50) ? 'flagged' : 'entered',
     preferences: finalPreferences,
-    isBot: req.body.isBot || false,
-    speedClass: req.body.speedClass || 'normal',
   };
 
   try {
@@ -190,6 +221,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
 
     return res.status(201).json({
       isDuplicate: false,
+      code: 'ACCEPTED',
       entry: newEntry,
     });
   } catch (err: any) {
@@ -198,10 +230,11 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
       const existing = db.get(`drops/${dropId}/entries`, identityKey);
       return res.json({
         isDuplicate: true,
+        code: 'DUPLICATE_RECEIPT',
         entry: existing?.data,
       });
     }
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message, code: 'VALIDATION' });
   }
 }
 

@@ -10,6 +10,7 @@ import { Skeleton, CardSkeleton } from '@/components/admin/SkeletonLoader';
 import { AdminDashboardData, AdminMetricPoint } from '@shared/types';
 import { ChartWrapper } from '@/components/ui/ChartWrapper';
 import { Button } from '@/components/ui/Button';
+import { ThreatMonitor } from '@/components/security/ThreatMonitor';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -345,6 +346,8 @@ export const AdminDashboardPage: React.FC = () => {
           </ResponsiveContainer>
         </ChartWrapper>
       </div>
+
+      <ThreatMonitor dropId={selectedDropId} />
 
       {/* Operational Controls & Health Strip */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
