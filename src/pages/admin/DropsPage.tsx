@@ -5,42 +5,20 @@ import { PageHeader } from '@/components/admin/PageHeader';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog';
 import { Button } from '@/components/ui/Button';
-import { Drop, TicketTier } from '@shared/types';
-import { DEFAULT_TIERS } from '@shared/constants';
+import { Drop } from '@shared/types';
 import {
-  Calendar,
   PlusCircle,
   PlayCircle,
   PauseCircle,
   Copy,
   ExternalLink,
-  Layers,
-  Sparkles,
-  Ticket,
   Edit2,
-  ArrowRight,
 } from 'lucide-react';
 
 export const DropsPage: React.FC = () => {
   const { drops, createDrop, updateDrop, addToast } = useApp();
   const [dropsList, setDropsList] = useState<Drop[]>(drops);
   const [searchValue, setSearchValue] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
-
-  // Form state
-  const [name, setName] = useState('');
-  const [artist, setArtist] = useState('');
-  const [venue, setVenue] = useState('');
-  const [city, setCity] = useState('Nashville, TN');
-  const [seatCount, setSeatCount] = useState(500);
-  const [price, setPrice] = useState(2500);
-  const [currency, setCurrency] = useState<'Rs' | 'USD'>('Rs');
-  const [mode, setMode] = useState<'FAIR_DROP' | 'FCFS'>('FAIR_DROP');
-  const [windowStart, setWindowStart] = useState(new Date().toISOString().substring(0, 16));
-  const [windowEnd, setWindowEnd] = useState(new Date(Date.now() + 60 * 60 * 1000).toISOString().substring(0, 16));
-  const [holdDurationSec, setHoldDurationSec] = useState(300);
-  const [formTiers, setFormTiers] = useState<TicketTier[]>(() => DEFAULT_TIERS.map(t => ({ ...t })));
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     setDropsList(drops);
@@ -80,54 +58,6 @@ export const DropsPage: React.FC = () => {
       addToast('success', 'Drop Duplicated', `Created "${duplicated.name}".`);
     } catch (err: any) {
       addToast('error', 'Duplication Failed', err.message);
-    }
-  };
-
-  const handleSaveDrop = async (publishImmediately: boolean) => {
-    if (!name.trim()) {
-      addToast('error', 'Validation Error', 'Event name is required.');
-      return;
-    }
-    const startMs = new Date(windowStart).getTime();
-    const endMs = new Date(windowEnd).getTime();
-    if (endMs <= startMs) {
-      addToast('error', 'Validation Error', 'Window end time must be after start time.');
-      return;
-    }
-
-    const calculatedSeats = formTiers.reduce((acc, t) => acc + (Number(t.seatCount) || 0), 0) || Number(seatCount) || 500;
-    const minTierPrice = formTiers.length > 0 ? Math.min(...formTiers.map(t => t.price)) : price;
-
-    setIsSubmitting(true);
-    try {
-      await createDrop({
-        name,
-        artistOrHost: artist || 'Featured Host',
-        venue: venue || 'The Grand Hall',
-        city,
-        seatCount: calculatedSeats,
-        price: Number(price) || minTierPrice || 85,
-        currency,
-        mode,
-        status: publishImmediately ? 'open' : 'draft',
-        holdDurationSec: Number(holdDurationSec) || 300,
-        windowStart: new Date(windowStart).toISOString(),
-        windowEnd: new Date(windowEnd).toISOString(),
-        drawTime: new Date(endMs + 1000 * 60 * 5).toISOString(),
-        tiers: formTiers,
-      });
-
-      addToast('success', 'Drop Created', `Event "${name}" saved ${publishImmediately ? 'and published' : 'as draft'} with ${calculatedSeats} seats across 5 tiers.`);
-      setIsCreating(false);
-      // Reset
-      setName('');
-      setArtist('');
-      setVenue('');
-      setFormTiers(DEFAULT_TIERS.map(t => ({ ...t })));
-    } catch (err: any) {
-      addToast('error', 'Save Failed', err.message);
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -251,238 +181,17 @@ export const DropsPage: React.FC = () => {
         title="Event Drops"
         description="Configure lottery drops, manage registration windows, ticket tiers, and view allocation status."
         actions={
-          <div className="flex items-center gap-2.5">
-            <Link to="/admin/drops/create">
-              <Button
-                size="md"
-                variant="primary"
-                leftIcon={<PlusCircle className="w-4 h-4" />}
-              >
-                Create New Drop
-              </Button>
-            </Link>
-            <Button
-              size="md"
-              variant="outline"
-              onClick={() => setIsCreating(!isCreating)}
-            >
-              {isCreating ? 'Close Form' : 'Quick Drawer'}
-            </Button>
-          </div>
-        }
-      />
-
-      {/* Create / Edit Form Modal */}
-      {isCreating && (
-        <div className="p-6 rounded-2xl bg-[#0d0f17] border border-brand-yellow/30 shadow-2xl space-y-6 animate-scale-up mb-8">
-          <div className="flex items-center justify-between border-b border-white/10 pb-4">
-            <div>
-              <h3 className="text-xl font-stamp font-black text-white uppercase tracking-tight">
-                Create Allocation Drop
-              </h3>
-              <p className="text-xs text-slate-400 font-sans">
-                Set window parameters, seat inventory count, and hold policy.
-              </p>
-            </div>
-            <Button size="sm" variant="outline" onClick={() => setIsCreating(false)}>
-              Cancel
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 text-xs font-sans">
-            <div className="space-y-1.5 sm:col-span-2">
-              <label className="text-slate-400 font-mono uppercase block">Event Title *</label>
-              <input
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="e.g. Jack White: The Twilight Echoes Vault Edition"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-100 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono uppercase block">Artist / Host</label>
-              <input
-                type="text"
-                value={artist}
-                onChange={e => setArtist(e.target.value)}
-                placeholder="e.g. Third Man Records"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-100 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono uppercase block">Venue</label>
-              <input
-                type="text"
-                value={venue}
-                onChange={e => setVenue(e.target.value)}
-                placeholder="e.g. Blue Room Theatre"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-100 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono uppercase block">City</label>
-              <input
-                type="text"
-                value={city}
-                onChange={e => setCity(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-100 border border-white/10 text-white focus:outline-none focus:border-brand-yellow"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono uppercase block">Allocation Mode</label>
-              <select
-                value={mode}
-                onChange={e => setMode(e.target.value as any)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-100 border border-white/10 text-white focus:outline-none focus:border-brand-yellow"
-              >
-                <option value="FAIR_DROP">Fair Drop (Verifiable Lottery)</option>
-                <option value="FCFS">FCFS (Control Benchmark)</option>
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono uppercase block">Total Seats</label>
-              <input
-                type="number"
-                min="10"
-                max="5000"
-                value={seatCount}
-                onChange={e => setSeatCount(parseInt(e.target.value) || 500)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-100 border border-white/10 text-white font-mono focus:outline-none focus:border-brand-yellow"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono uppercase block">Base Price (Rs)</label>
-              <input
-                type="number"
-                min="0"
-                value={price}
-                onChange={e => setPrice(parseInt(e.target.value) || 85)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-100 border border-white/10 text-white font-mono focus:outline-none focus:border-brand-yellow"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono uppercase block">Hold Duration (Sec)</label>
-              <input
-                type="number"
-                min="30"
-                max="1800"
-                value={holdDurationSec}
-                onChange={e => setHoldDurationSec(parseInt(e.target.value) || 300)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-100 border border-white/10 text-white font-mono focus:outline-none focus:border-brand-yellow"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono uppercase block">Registration Window Start</label>
-              <input
-                type="datetime-local"
-                value={windowStart}
-                onChange={e => setWindowStart(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-100 border border-white/10 text-white font-mono focus:outline-none focus:border-brand-yellow"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono uppercase block">Registration Window End</label>
-              <input
-                type="datetime-local"
-                value={windowEnd}
-                onChange={e => setWindowEnd(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-100 border border-white/10 text-white font-mono focus:outline-none focus:border-brand-yellow"
-              />
-            </div>
-          </div>
-
-          {/* Active 5 Ticket Tiers & Pricing Configuration */}
-          <div className="p-4 rounded-xl bg-surface-100 border border-brand-yellow/30 space-y-3">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <div className="flex items-center gap-2">
-                <Ticket className="w-4 h-4 text-brand-yellow" />
-                <h4 className="text-xs font-mono font-bold uppercase text-white">
-                  Ticket Tiers & Price Configuration
-                </h4>
-              </div>
-              <span className="text-[11px] font-mono text-brand-yellow">
-                Total: {formTiers.reduce((acc, t) => acc + (t.seatCount || 0), 0)} Seats
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
-              {formTiers.map((tier) => (
-                <div key={tier.id} className="p-3 rounded-lg bg-[#090b12] border border-white/10 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono font-bold uppercase text-white">
-                      {tier.name}
-                    </span>
-                    <span className="text-[10px] font-mono text-slate-400">
-                      {tier.seatCount} seats
-                    </span>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-mono text-slate-400 uppercase block">
-                      Price ({currency === 'Rs' ? '₹' : '$'})
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={tier.price}
-                      onChange={e => {
-                        const val = parseInt(e.target.value) || 0;
-                        setFormTiers(prev => prev.map(t => t.id === tier.id ? { ...t, price: val } : t));
-                      }}
-                      className="w-full px-2 py-1 text-xs bg-surface-100 border border-brand-yellow/30 rounded text-white font-mono font-bold focus:outline-none focus:border-brand-yellow"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-mono text-slate-400 uppercase block">
-                      Seats
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={tier.seatCount}
-                      onChange={e => {
-                        const val = parseInt(e.target.value) || 0;
-                        setFormTiers(prev => prev.map(t => t.id === tier.id ? { ...t, seatCount: val } : t));
-                      }}
-                      className="w-full px-2 py-1 text-xs bg-surface-100 border border-white/10 rounded text-white font-mono focus:outline-none focus:border-brand-yellow"
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-white/10">
-            <Button
-              size="md"
-              variant="outline"
-              onClick={() => handleSaveDrop(false)}
-              disabled={isSubmitting}
-            >
-              Save as Draft
-            </Button>
+          <Link to="/admin/drops/create">
             <Button
               size="md"
               variant="primary"
-              onClick={() => handleSaveDrop(true)}
-              disabled={isSubmitting}
+              leftIcon={<PlusCircle className="w-4 h-4" />}
             >
-              {isSubmitting ? 'Publishing...' : 'Publish Drop'}
+              Create New Drop
             </Button>
-          </div>
-        </div>
-      )}
+          </Link>
+        }
+      />
 
       {/* Drops Table */}
       <DataTable

@@ -282,7 +282,94 @@ export const CreateDropPage: React.FC = () => {
       <div className="space-y-8">
         
         {/* ==================================================================== */}
-        {/* SECTION 1: TICKET PRICING & TIER CONFIGURATION (PRIMARY USER FOCUS) */}
+        {/* SECTION 1: EVENT & VENUE INFORMATION */}
+        {/* ==================================================================== */}
+        <section className="p-6 rounded-2xl bg-[#0f111a] border border-white/10 space-y-6">
+          <div className="flex items-center gap-3 border-b border-white/10 pb-4">
+            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-white">
+              <Building className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-mono font-bold text-white uppercase tracking-wider">
+                Event & Venue Information
+              </h2>
+              <p className="text-xs text-slate-400 font-sans">
+                Basic event metadata visible to attendees on landing and detail pages.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="space-y-1.5 sm:col-span-2">
+              <label className="text-xs font-mono text-slate-300 uppercase block font-semibold">
+                Event Title *
+              </label>
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="e.g. Jack White: The Twilight Echoes Vault Edition"
+                className="w-full px-4 py-2.5 text-sm bg-surface-100 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow font-sans"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-slate-300 uppercase block font-semibold">
+                Artist / Host *
+              </label>
+              <input
+                type="text"
+                required
+                value={artistOrHost}
+                onChange={e => setArtistOrHost(e.target.value)}
+                placeholder="e.g. Third Man Records"
+                className="w-full px-4 py-2.5 text-sm bg-surface-100 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow font-sans"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-slate-300 uppercase block font-semibold">
+                Venue
+              </label>
+              <input
+                type="text"
+                value={venue}
+                onChange={e => setVenue(e.target.value)}
+                placeholder="e.g. Blue Room Theatre"
+                className="w-full px-4 py-2.5 text-sm bg-surface-100 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow font-sans"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-slate-300 uppercase block font-semibold">
+                City / Location
+              </label>
+              <input
+                type="text"
+                value={city}
+                onChange={e => setCity(e.target.value)}
+                placeholder="e.g. Nashville, TN"
+                className="w-full px-4 py-2.5 text-sm bg-surface-100 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow font-sans"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-slate-300 uppercase block font-semibold">
+                Hero Image URL
+              </label>
+              <input
+                type="url"
+                value={heroImage}
+                onChange={e => setHeroImage(e.target.value)}
+                className="w-full px-4 py-2.5 text-sm bg-surface-100 border border-white/10 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-brand-yellow"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* ==================================================================== */}
+        {/* SECTION 2: TICKET PRICING & TIER INVENTORY */}
         {/* ==================================================================== */}
         <section className="p-6 rounded-2xl bg-[#0f111a] border border-brand-yellow/30 shadow-2xl space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
@@ -506,93 +593,6 @@ export const CreateDropPage: React.FC = () => {
 
             <div className="text-[11px] font-mono text-slate-400">
               5/5 Tiers Configured ✓
-            </div>
-          </div>
-        </section>
-
-        {/* ==================================================================== */}
-        {/* SECTION 2: EVENT & VENUE METADATA */}
-        {/* ==================================================================== */}
-        <section className="p-6 rounded-2xl bg-[#0f111a] border border-white/10 space-y-6">
-          <div className="flex items-center gap-3 border-b border-white/10 pb-4">
-            <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-white">
-              <Building className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-mono font-bold text-white uppercase tracking-wider">
-                Event & Venue Information
-              </h2>
-              <p className="text-xs text-slate-400 font-sans">
-                Basic event metadata visible to attendees on landing and detail pages.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            <div className="space-y-1.5 sm:col-span-2">
-              <label className="text-xs font-mono text-slate-300 uppercase block font-semibold">
-                Event Title *
-              </label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="e.g. Jack White: The Twilight Echoes Vault Edition"
-                className="w-full px-4 py-2.5 text-sm bg-surface-100 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow font-sans"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono text-slate-300 uppercase block font-semibold">
-                Artist / Host *
-              </label>
-              <input
-                type="text"
-                required
-                value={artistOrHost}
-                onChange={e => setArtistOrHost(e.target.value)}
-                placeholder="e.g. Third Man Records"
-                className="w-full px-4 py-2.5 text-sm bg-surface-100 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow font-sans"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono text-slate-300 uppercase block font-semibold">
-                Venue
-              </label>
-              <input
-                type="text"
-                value={venue}
-                onChange={e => setVenue(e.target.value)}
-                placeholder="e.g. Blue Room Theatre"
-                className="w-full px-4 py-2.5 text-sm bg-surface-100 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow font-sans"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono text-slate-300 uppercase block font-semibold">
-                City / Location
-              </label>
-              <input
-                type="text"
-                value={city}
-                onChange={e => setCity(e.target.value)}
-                placeholder="e.g. Nashville, TN"
-                className="w-full px-4 py-2.5 text-sm bg-surface-100 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow font-sans"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-mono text-slate-300 uppercase block font-semibold">
-                Hero Image URL
-              </label>
-              <input
-                type="url"
-                value={heroImage}
-                onChange={e => setHeroImage(e.target.value)}
-                className="w-full px-4 py-2.5 text-sm bg-surface-100 border border-white/10 rounded-xl text-white font-mono text-xs focus:outline-none focus:border-brand-yellow"
-              />
             </div>
           </div>
         </section>
