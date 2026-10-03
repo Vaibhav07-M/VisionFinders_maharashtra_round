@@ -4,7 +4,7 @@ import { SimulationConfig, SimulationTrialResult, FairnessComparisonReport } fro
 import { appendAuditRecord } from './audit';
 
 // Calculate Jain's Fairness Index: (sum(xi))^2 / (n * sum(xi^2))
-function calculateJainsIndex(allocations: number[]): number {
+export function calculateJainsIndex(allocations: number[]): number {
   if (!allocations.length) return 1.0;
   const n = allocations.length;
   const sum = allocations.reduce((a, b) => a + b, 0);
@@ -14,7 +14,7 @@ function calculateJainsIndex(allocations: number[]): number {
 }
 
 // Calculate Gini Coefficient
-function calculateGini(allocations: number[]): number {
+export function calculateGini(allocations: number[]): number {
   if (!allocations.length) return 0;
   const sorted = [...allocations].sort((a, b) => a - b);
   const n = sorted.length;
@@ -27,8 +27,7 @@ function calculateGini(allocations: number[]): number {
   return Number((numerator / denominator).toFixed(4));
 }
 
-export async function runSimulationApiHandler(req: Request, res: Response) {
-  const config: SimulationConfig = req.body;
+export function computeTrialForConfig(config: SimulationConfig): { trial: SimulationTrialResult; fcfs: SimulationTrialResult; comparison: FairnessComparisonReport } {
   const total = config.totalUsers || 50000;
   const botShare = config.botSharePercentage || 30;
   const botCount = Math.floor(total * (botShare / 100));
@@ -81,7 +80,7 @@ export async function runSimulationApiHandler(req: Request, res: Response) {
   const jains = calculateJainsIndex(sampleAllocations);
   const gini = isFairDrop ? 0.08 : 0.64;
 
-  const trialId = `trial_${Date.now().toString(36)}`;
+  const trialId = `trial_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   const trialResult: SimulationTrialResult = {
     trialId,
     config,
@@ -149,16 +148,200 @@ export async function runSimulationApiHandler(req: Request, res: Response) {
     },
   };
 
-  db.set('simulationRuns', trialId, comparisonReport);
+  return { trial: trialResult, fcfs: fcfsTrial, comparison: comparisonReport };
+}
+
+// POST /api/simulation/run
+export async function runSimulationApiHandler(req: Request, res: Response) {
+  const config: SimulationConfig = req.body;
+  const { trial, comparison } = computeTrialForConfig(config);
+
+  db.set('simulationRuns', trial.trialId, comparison);
   appendAuditRecord('SIMULATION_RUN_COMPLETED', 'admin', {
-    trialId,
-    totalUsers: total,
-    botShare,
+    trialId: trial.trialId,
+    totalUsers: config.totalUsers,
+    botShare: config.botSharePercentage,
     mode: config.mode,
   });
 
   return res.json({
-    trial: trialResult,
-    comparison: comparisonReport,
+    trial,
+    comparison,
   });
+}
+
+// GET /api/simulation/latest
+export function getLatestSimulationHandler(req: Request, res: Response) {
+  const runs = db.list('simulationRuns').map(d => d.data as FairnessComparisonReport);
+  if (runs.length === 0) {
+    // Seed default baseline if empty
+    const defaultConfig: SimulationConfig = {
+      scenarioName: 'Standard 50,000 Client Benchmark',
+      totalUsers: 50000,
+      botSharePercentage: 30,
+      selectedProfiles: ['fast_single_shot', 'distributed_botnet'],
+      requestsPerSecPerBot: 50,
+      retriesPerBot: 3,
+      ipPoolSize: 2000,
+      accountsPerOperator: 10,
+      mode: 'FAIR_DROP',
+      trialCount: 5,
+      randomSeed: 'DEFAULT_BENCHMARK_2026',
+      defences: {
+        turnstileEnabled: true,
+        powEnabled: true,
+        powDifficulty: 2,
+        honeypotEnabled: true,
+        rateLimitPerIp: 20,
+        rateLimitPerAccount: 60,
+        rateLimitPerDevice: 60,
+        timingJitterCheck: true,
+        riskScoringEnabled: true,
+        minRiskBlockScore: 80,
+        minRiskChallengeScore: 50,
+      },
+    };
+    const { trial, comparison } = computeTrialForConfig(defaultConfig);
+    db.set('simulationRuns', trial.trialId, comparison);
+    return res.json({ report: comparison });
+  }
+
+  // Return the most recent run
+  const latest = runs[runs.length - 1];
+  return res.json({ report: latest });
+}
+
+// GET /api/simulation/runs
+export function listSimulationRunsHandler(req: Request, res: Response) {
+  const runs = db.list('simulationRuns').map(d => d.data as FairnessComparisonReport);
+  return res.json({ runs, count: runs.length });
+}
+
+// GET /api/simulation/matrix
+export function getExperimentMatrixHandler(req: Request, res: Response) {
+  // Read all runs or generate matrix rows based on stored runs
+  let runs = db.list('simulationRuns').map(d => d.data as FairnessComparisonReport);
+  
+  if (runs.length === 0) {
+    // Seed standard matrix benchmarks into Firestore
+    const matrixPresets: SimulationConfig[] = [
+      {
+        scenarioName: 'Fast Single-Shot Sniper - Fair Drop',
+        totalUsers: 50000,
+        botSharePercentage: 30,
+        selectedProfiles: ['fast_single_shot'],
+        requestsPerSecPerBot: 50,
+        retriesPerBot: 0,
+        ipPoolSize: 500,
+        accountsPerOperator: 1,
+        mode: 'FAIR_DROP',
+        trialCount: 5,
+        randomSeed: 'SEED_EXP_001',
+        defences: { turnstileEnabled: true, powEnabled: true, powDifficulty: 2, honeypotEnabled: true, rateLimitPerIp: 20, rateLimitPerAccount: 60, rateLimitPerDevice: 60, timingJitterCheck: true, riskScoringEnabled: true, minRiskBlockScore: 80, minRiskChallengeScore: 50 },
+      },
+      {
+        scenarioName: 'Fast Single-Shot Sniper - FCFS Control',
+        totalUsers: 50000,
+        botSharePercentage: 30,
+        selectedProfiles: ['fast_single_shot'],
+        requestsPerSecPerBot: 50,
+        retriesPerBot: 0,
+        ipPoolSize: 500,
+        accountsPerOperator: 1,
+        mode: 'FCFS',
+        trialCount: 5,
+        randomSeed: 'SEED_EXP_002',
+        defences: { turnstileEnabled: false, powEnabled: false, powDifficulty: 0, honeypotEnabled: false, rateLimitPerIp: 9999, rateLimitPerAccount: 9999, rateLimitPerDevice: 9999, timingJitterCheck: false, riskScoringEnabled: false, minRiskBlockScore: 100, minRiskChallengeScore: 100 },
+      },
+      {
+        scenarioName: 'Distributed Residential Botnet - Fair Drop',
+        totalUsers: 50000,
+        botSharePercentage: 50,
+        selectedProfiles: ['distributed_botnet'],
+        requestsPerSecPerBot: 10,
+        retriesPerBot: 5,
+        ipPoolSize: 5000,
+        accountsPerOperator: 5,
+        mode: 'FAIR_DROP',
+        trialCount: 10,
+        randomSeed: 'SEED_EXP_003',
+        defences: { turnstileEnabled: true, powEnabled: true, powDifficulty: 2, honeypotEnabled: true, rateLimitPerIp: 20, rateLimitPerAccount: 60, rateLimitPerDevice: 60, timingJitterCheck: true, riskScoringEnabled: true, minRiskBlockScore: 80, minRiskChallengeScore: 50 },
+      },
+      {
+        scenarioName: 'Distributed Residential Botnet - FCFS Control',
+        totalUsers: 50000,
+        botSharePercentage: 50,
+        selectedProfiles: ['distributed_botnet'],
+        requestsPerSecPerBot: 10,
+        retriesPerBot: 5,
+        ipPoolSize: 5000,
+        accountsPerOperator: 5,
+        mode: 'FCFS',
+        trialCount: 10,
+        randomSeed: 'SEED_EXP_004',
+        defences: { turnstileEnabled: true, powEnabled: true, powDifficulty: 2, honeypotEnabled: true, rateLimitPerIp: 20, rateLimitPerAccount: 60, rateLimitPerDevice: 60, timingJitterCheck: true, riskScoringEnabled: true, minRiskBlockScore: 80, minRiskChallengeScore: 50 },
+      },
+      {
+        scenarioName: 'Sybil Farm Operator - Fair Drop',
+        totalUsers: 50000,
+        botSharePercentage: 20,
+        selectedProfiles: ['sybil_farm'],
+        requestsPerSecPerBot: 2,
+        retriesPerBot: 2,
+        ipPoolSize: 500,
+        accountsPerOperator: 50,
+        mode: 'FAIR_DROP',
+        trialCount: 5,
+        randomSeed: 'SEED_EXP_005',
+        defences: { turnstileEnabled: true, powEnabled: true, powDifficulty: 2, honeypotEnabled: true, rateLimitPerIp: 20, rateLimitPerAccount: 60, rateLimitPerDevice: 60, timingJitterCheck: true, riskScoringEnabled: true, minRiskBlockScore: 80, minRiskChallengeScore: 50 },
+      },
+      {
+        scenarioName: 'Pure Human Flash Crowd - Fair Drop',
+        totalUsers: 50000,
+        botSharePercentage: 0,
+        selectedProfiles: [],
+        requestsPerSecPerBot: 1,
+        retriesPerBot: 0,
+        ipPoolSize: 50000,
+        accountsPerOperator: 1,
+        mode: 'FAIR_DROP',
+        trialCount: 5,
+        randomSeed: 'SEED_EXP_006',
+        defences: { turnstileEnabled: true, powEnabled: true, powDifficulty: 2, honeypotEnabled: true, rateLimitPerIp: 20, rateLimitPerAccount: 60, rateLimitPerDevice: 60, timingJitterCheck: true, riskScoringEnabled: true, minRiskBlockScore: 80, minRiskChallengeScore: 50 },
+      },
+    ];
+
+    for (const preset of matrixPresets) {
+      const { trial, comparison } = computeTrialForConfig(preset);
+      db.set('simulationRuns', trial.trialId, comparison);
+    }
+    runs = db.list('simulationRuns').map(d => d.data as FairnessComparisonReport);
+  }
+
+  // Map stored simulation runs to matrix rows
+  const rows = runs.map((run, idx) => {
+    const trial = run.scenarios.fairDrop;
+    const botShare = trial.config.botSharePercentage;
+    const isFcfs = trial.config.mode === 'FCFS';
+    const profile = trial.config.selectedProfiles?.[0]?.replace(/_/g, ' ') || (botShare === 0 ? 'Pure Human Flash Crowd' : 'Multi-Vector Assault');
+    const defences = !trial.config.defences?.powEnabled ? 'Disabled (Raw)' : trial.config.defences?.turnstileEnabled ? 'All Active' : 'Turnstile Only';
+    const botWinShare = trial.funnel.selected.total > 0 ? Number(((trial.funnel.selected.bot / trial.funnel.selected.total) * 100).toFixed(1)) : 0;
+
+    return {
+      id: `EXP-${String(idx + 1).padStart(3, '0')}`,
+      trialId: trial.trialId,
+      mode: trial.config.mode,
+      botShare,
+      profile: profile.charAt(0).toUpperCase() + profile.slice(1),
+      defences,
+      trials: trial.config.trialCount || 5,
+      botWinShare,
+      botAdvantageRatio: trial.botAdvantageRatio,
+      jainsIndex: trial.jainsFairnessIndex,
+      gini: trial.giniCoefficient,
+      status: 'completed' as const,
+    };
+  });
+
+  return res.json({ matrix: rows, count: rows.length });
 }

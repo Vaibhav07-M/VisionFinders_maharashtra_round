@@ -7,6 +7,14 @@ import { appendAuditRecord } from './audit';
 
 const HMAC_SECRET = process.env.HMAC_TICKET_SECRET || 'FAIR_DROP_SECRET_HMAC_KEY_2026';
 
+// GET /api/tickets/me
+export function getMyTicketsHandler(req: AuthenticatedRequest, res: Response) {
+  const uid = req.user?.uid || 'user_alex_77';
+  const tickets = db.list('tickets').map(d => d.data as Ticket).filter(t => t.uid === uid);
+  return res.json({ tickets, count: tickets.length });
+}
+
+// POST /api/checkout
 export async function checkoutHandler(req: AuthenticatedRequest, res: Response) {
   const { dropId, seatId, paymentMethod, idempotencyKey } = req.body;
   const uid = req.user?.uid || 'user_alex_77';
@@ -56,7 +64,7 @@ export async function checkoutHandler(req: AuthenticatedRequest, res: Response) 
     status: 'confirmed',
     qrPayload: `FAIRDROP:TICKET:${ticketId}:SIG:${signature.substring(0, 16)}`,
     signature,
-    holderName: req.user?.email || 'Alex Chen',
+    holderName: req.user?.displayName || req.user?.email || 'Alex Chen',
     holderEmail: req.user?.email || 'alex.chen@fairdrop.io',
   };
 

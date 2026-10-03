@@ -1,86 +1,80 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Table, TableHead, TableBody, TableRow, TableCell, TableHeaderCell } from '@/components/ui/Table';
 import { Modal } from '@/components/ui/Modal';
-import { Search, ShieldAlert, CheckCircle2, UserX, Flag, Eye, Filter } from 'lucide-react';
+import { Search, ShieldAlert, CheckCircle2, UserX, Flag, Eye, Filter, Loader2, AlertCircle, Users } from 'lucide-react';
 import { DropEntry } from '@shared/types';
+import { api } from '@/utils/api';
 
 export const EntriesUsersPage: React.FC = () => {
-  const { entries, addToast } = useApp();
+  const { drops, addToast } = useApp();
+  const [selectedDropId, setSelectedDropId] = useState<string>('');
+  const [entries, setEntries] = useState<DropEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedEntry, setSelectedEntry] = useState<DropEntry | null>(null);
 
-  // Mock sample entries if store is empty
-  const sampleEntries: DropEntry[] = entries.length > 0 ? entries : [
-    {
-      receiptId: 'RCP-M1K2-901',
-      dropId: 'drop-jack-white-vault',
-      uid: 'user_alex_77',
-      identityKey: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      idempotencyKey: 'idemp_m1k2_901',
-      arrivedAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-      serverTimestamp: Date.now() - 1000 * 60 * 12,
-      riskScore: 8,
-      status: 'eligible',
-    },
-    {
-      receiptId: 'RCP-BOTS-404',
-      dropId: 'drop-jack-white-vault',
-      uid: 'bot_proxy_99',
-      identityKey: '9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b',
-      idempotencyKey: 'idemp_bot_spam_01',
-      arrivedAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
-      serverTimestamp: Date.now() - 1000 * 60 * 10,
-      riskScore: 92,
-      status: 'blocked',
-      isBot: true,
-      botProfile: 'naive_flooder',
-    },
-    {
-      receiptId: 'RCP-SUSP-310',
-      dropId: 'drop-jack-white-vault',
-      uid: 'user_sarah_m',
-      identityKey: '11223344556677889900aabbccddeeff0011223344556677889900aabbccddeeff',
-      idempotencyKey: 'idemp_sarah_m',
-      arrivedAt: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
-      serverTimestamp: Date.now() - 1000 * 60 * 8,
-      riskScore: 68,
-      status: 'flagged',
-    },
-    {
-      receiptId: 'RCP-FAST-001',
-      dropId: 'drop-jack-white-vault',
-      uid: 'bot_sniper_001',
-      identityKey: 'deadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678',
-      idempotencyKey: 'idemp_sniper_zero',
-      arrivedAt: new Date(Date.now() - 1000 * 60 * 14).toISOString(),
-      serverTimestamp: Date.now() - 1000 * 60 * 14,
-      riskScore: 78,
-      status: 'eligible',
-      isBot: true,
-      botProfile: 'fast_single_shot',
-    },
-  ];
+  useEffect(() => {
+    if (drops.length > 0 && !selectedDropId) {
+      setSelectedDropId(drops[0].id);
+    }
+  }, [drops, selectedDropId]);
 
-  const filteredEntries = sampleEntries.filter(e => {
+  const fetchEntries = async (dropId: string) => {
+    if (!dropId) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await api.drops.getEntries(dropId);
+      setEntries(res.entries || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load entries from Firestore.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedDropId) {
+      fetchEntries(selectedDropId);
+    }
+  }, [selectedDropId]);
+
+  const filteredEntries = entries.filter(e => {
     const matchesSearch =
-      e.receiptId.toLowerCase().includes(search.toLowerCase()) ||
-      e.uid.toLowerCase().includes(search.toLowerCase());
+      (e.receiptId || '').toLowerCase().includes(search.toLowerCase()) ||
+      (e.uid || '').toLowerCase().includes(search.toLowerCase()) ||
+      (e.identityKey || '').toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' ? true : e.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
-  const handleAction = (receiptId: string, action: 'flag' | 'ban' | 'clear') => {
-    addToast('info', 'Moderation Action Recorded', `${receiptId} set to ${action.toUpperCase()}. Logged in audit chain.`);
+  const handleAction = async (identityKey: string, newStatus: 'flagged' | 'blocked' | 'eligible') => {
+    try {
+      await api.drops.updateEntryStatus(selectedDropId, identityKey, newStatus);
+      setEntries(prev =>
+        prev.map(e => (e.identityKey === identityKey ? { ...e, status: newStatus } : e))
+      );
+      addToast(
+        'info',
+        'Moderation Action Recorded',
+        `Entry ${identityKey.substring(0, 10)}... status updated to ${newStatus.toUpperCase()} in Firestore.`
+      );
+      if (selectedEntry && selectedEntry.identityKey === identityKey) {
+        setSelectedEntry(prev => (prev ? { ...prev, status: newStatus } : null));
+      }
+    } catch (err: any) {
+      addToast('error', 'Action Failed', err.message);
+    }
   };
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-8 pb-20">
-      
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
         <div>
@@ -90,191 +84,247 @@ export const EntriesUsersPage: React.FC = () => {
             <span>B4. Attendee & Risk Register</span>
           </div>
           <h1 className="text-3xl font-stamp font-black text-white uppercase tracking-tight mt-1">
-            Entries Pool & Risk Scoring Register
+            Entries Pool & Risk Register
           </h1>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Drop Selector */}
+          <select
+            value={selectedDropId}
+            onChange={e => setSelectedDropId(e.target.value)}
+            className="bg-surface-100 border border-white/15 rounded-lg px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-brand-yellow"
+          >
+            {drops.map(d => (
+              <option key={d.id} value={d.id} className="bg-surface-200 text-white">
+                {d.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Search Box */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search receipt ID, UID..."
+              placeholder="Search receipt, UID..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="pl-9 pr-3 py-1.5 text-xs bg-surface-100 border border-white/10 rounded-lg text-white font-mono placeholder-slate-500 focus:outline-none focus:border-brand-yellow w-56"
+              className="bg-surface-100 border border-white/10 rounded-lg pl-9 pr-4 py-1.5 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-brand-yellow"
             />
           </div>
 
-          <div className="flex bg-surface-100 p-1 rounded-lg border border-white/10 text-xs font-mono">
-            {['all', 'eligible', 'flagged', 'blocked'].map(status => (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(status)}
-                className={`px-2.5 py-1 rounded uppercase font-semibold text-[10px] ${
-                  statusFilter === status
-                    ? 'bg-brand-yellow text-black'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {status}
-              </button>
-            ))}
-          </div>
+          {/* Filter Status */}
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="bg-surface-100 border border-white/10 rounded-lg px-3 py-1.5 text-xs font-mono text-white focus:outline-none"
+          >
+            <option value="all">All Statuses ({entries.length})</option>
+            <option value="eligible">Eligible ({entries.filter(e => e.status === 'eligible').length})</option>
+            <option value="flagged">Flagged ({entries.filter(e => e.status === 'flagged').length})</option>
+            <option value="selected">Selected ({entries.filter(e => e.status === 'selected').length})</option>
+            <option value="blocked">Blocked ({entries.filter(e => e.status === 'blocked').length})</option>
+          </select>
         </div>
       </div>
 
-      {/* Entries Table */}
-      <Table>
-        <TableHead>
-          <tr>
-            <TableHeaderCell>Receipt ID</TableHeaderCell>
-            <TableHeaderCell>User ID / Identity</TableHeaderCell>
-            <TableHeaderCell>Arrival Order</TableHeaderCell>
-            <TableHeaderCell>Risk Score</TableHeaderCell>
-            <TableHeaderCell>Entry Status</TableHeaderCell>
-            <TableHeaderCell className="text-right">Actions</TableHeaderCell>
-          </tr>
-        </TableHead>
-        <TableBody>
-          {filteredEntries.map(entry => (
-            <TableRow key={entry.receiptId}>
-              <TableCell className="font-mono font-bold text-brand-yellow">
-                {entry.receiptId}
-              </TableCell>
+      {loading ? (
+        <div className="py-24 flex flex-col items-center justify-center space-y-3">
+          <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+          <p className="text-xs font-mono text-slate-400">Loading entries from Firestore...</p>
+        </div>
+      ) : error ? (
+        <Card variant="default" className="border-rose-500/30 p-8 text-center space-y-4">
+          <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
+          <h2 className="text-lg font-stamp uppercase text-white font-bold">Failed to load entries</h2>
+          <p className="text-xs text-slate-400 font-mono">{error}</p>
+          <Button onClick={() => fetchEntries(selectedDropId)} size="sm" variant="primary">
+            Retry
+          </Button>
+        </Card>
+      ) : filteredEntries.length === 0 ? (
+        <Card variant="glass" className="p-8 text-center space-y-4">
+          <Users className="w-10 h-10 text-brand-yellow mx-auto" />
+          <h2 className="text-lg font-stamp uppercase text-white font-bold">No Entries Found</h2>
+          <p className="text-xs text-slate-400">
+            {search || statusFilter !== 'all'
+              ? 'No entries match the active search query or filter.'
+              : 'No entries registered yet for this drop event.'}
+          </p>
+        </Card>
+      ) : (
+        <Table>
+          <TableHead>
+            <tr>
+              <TableHeaderCell>Receipt ID</TableHeaderCell>
+              <TableHeaderCell>User / Account UID</TableHeaderCell>
+              <TableHeaderCell>Identity Hash</TableHeaderCell>
+              <TableHeaderCell>Arrival Timestamp</TableHeaderCell>
+              <TableHeaderCell>Risk Score</TableHeaderCell>
+              <TableHeaderCell>Status</TableHeaderCell>
+              <TableHeaderCell>Actions</TableHeaderCell>
+            </tr>
+          </TableHead>
+          <TableBody>
+            {filteredEntries.map(entry => (
+              <TableRow key={entry.identityKey}>
+                <TableCell className="font-mono text-brand-yellow font-bold">
+                  {entry.receiptId}
+                </TableCell>
 
-              <TableCell className="font-mono text-xs">
-                <span className="text-white block">{entry.uid}</span>
-                <span className="text-slate-500 text-[10px] truncate block max-w-[180px]">
-                  {entry.identityKey}
-                </span>
-              </TableCell>
-
-              <TableCell className="font-mono text-xs text-slate-300">
-                {new Date(entry.arrivedAt).toLocaleTimeString()}
-              </TableCell>
-
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <div className="w-16 h-2 rounded-full bg-slate-800 overflow-hidden">
-                    <div
-                      className={`h-full ${
-                        entry.riskScore > 75
-                          ? 'bg-rose-500'
-                          : entry.riskScore > 40
-                          ? 'bg-amber-400'
-                          : 'bg-emerald-400'
-                      }`}
-                      style={{ width: `${entry.riskScore}%` }}
-                    />
+                <TableCell className="font-mono text-xs text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    {entry.isBot ? (
+                      <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 text-[10px] font-bold">
+                        BOT
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                        HUMAN
+                      </span>
+                    )}
+                    <span>{entry.uid}</span>
                   </div>
+                </TableCell>
+
+                <TableCell className="font-mono text-[11px] text-slate-400">
+                  {entry.identityKey ? `${entry.identityKey.substring(0, 10)}...${entry.identityKey.slice(-6)}` : 'N/A'}
+                </TableCell>
+
+                <TableCell className="font-mono text-xs text-slate-400">
+                  {new Date(entry.arrivedAt).toLocaleTimeString()}
+                </TableCell>
+
+                <TableCell className="font-mono text-xs font-bold">
                   <span
-                    className={`font-mono text-xs font-bold ${
+                    className={`px-2 py-0.5 rounded ${
                       entry.riskScore > 75
-                        ? 'text-rose-400'
-                        : entry.riskScore > 40
-                        ? 'text-amber-400'
-                        : 'text-emerald-400'
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        : entry.riskScore > 50
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                     }`}
                   >
-                    {entry.riskScore}
+                    {entry.riskScore} / 100
                   </span>
-                </div>
-              </TableCell>
+                </TableCell>
 
-              <TableCell>
-                <Badge
-                  variant={
-                    entry.status === 'eligible'
-                      ? 'emerald'
-                      : entry.status === 'flagged'
-                      ? 'amber'
-                      : 'rose'
-                  }
-                  size="sm"
-                >
-                  {entry.status.toUpperCase()}
-                </Badge>
-              </TableCell>
+                <TableCell>
+                  <Badge
+                    variant={
+                      entry.status === 'selected'
+                        ? 'yellow'
+                        : entry.status === 'eligible'
+                        ? 'emerald'
+                        : entry.status === 'flagged'
+                        ? 'amber'
+                        : 'rose'
+                    }
+                    size="sm"
+                    dot
+                  >
+                    {entry.status.toUpperCase()}
+                  </Badge>
+                </TableCell>
 
-              <TableCell className="text-right space-x-1">
-                <button
-                  onClick={() => setSelectedEntry(entry)}
-                  className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-white/5"
-                  title="View Details"
-                >
-                  <Eye className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => handleAction(entry.receiptId, 'flag')}
-                  className="p-1.5 rounded text-slate-400 hover:text-amber-400 hover:bg-amber-500/10"
-                  title="Flag for Review"
-                >
-                  <Flag className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => handleAction(entry.receiptId, 'ban')}
-                  className="p-1.5 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10"
-                  title="Ban / Block Receipt"
-                >
-                  <UserX className="w-4 h-4" />
-                </button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setSelectedEntry(entry)}
+                      className="p-1 rounded bg-surface-100 hover:bg-surface-200 text-slate-300 hover:text-white"
+                      title="Inspect metadata"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
+                    {entry.status !== 'flagged' && (
+                      <button
+                        onClick={() => handleAction(entry.identityKey, 'flagged')}
+                        className="p-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-400"
+                        title="Flag for review"
+                      >
+                        <Flag className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {entry.status !== 'blocked' && (
+                      <button
+                        onClick={() => handleAction(entry.identityKey, 'blocked')}
+                        className="p-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400"
+                        title="Disqualify entry"
+                      >
+                        <UserX className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {entry.status !== 'eligible' && (
+                      <button
+                        onClick={() => handleAction(entry.identityKey, 'eligible')}
+                        className="p-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400"
+                        title="Mark eligible"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
 
-      {/* Entry Detail Inspector Modal */}
+      {/* Inspector Modal */}
       {selectedEntry && (
         <Modal
           isOpen={!!selectedEntry}
           onClose={() => setSelectedEntry(null)}
-          title={`Entry Receipt Inspector: ${selectedEntry.receiptId}`}
-          description="Detailed cryptographic identity key and risk heuristics"
+          title={`Entry Audit Inspector: ${selectedEntry.receiptId}`}
         >
-          <div className="space-y-4 font-mono text-xs">
-            <div className="p-3 rounded-lg bg-surface-200 space-y-2">
+          <div className="space-y-4 text-xs font-mono">
+            <div className="p-3 rounded-lg bg-surface-100 border border-white/10 space-y-2">
               <div className="flex justify-between">
-                <span className="text-slate-400">UID:</span>
-                <span className="text-white">{selectedEntry.uid}</span>
+                <span className="text-slate-400">Account UID:</span>
+                <span className="text-white font-bold">{selectedEntry.uid}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Idempotency Key:</span>
                 <span className="text-brand-yellow">{selectedEntry.idempotencyKey}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Arrived Timestamp:</span>
-                <span className="text-white">{selectedEntry.arrivedAt}</span>
+                <span className="text-slate-400">Identity SHA-256:</span>
+                <span className="text-slate-300 break-all">{selectedEntry.identityKey}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Risk Score:</span>
-                <span className="text-rose-400 font-bold">{selectedEntry.riskScore}/100</span>
+                <span className="text-slate-400">Server Timestamp:</span>
+                <span className="text-white">{selectedEntry.serverTimestamp} ({new Date(selectedEntry.arrivedAt).toISOString()})</span>
               </div>
-              {selectedEntry.botProfile && (
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Bot Signature Label:</span>
-                  <span className="text-rose-400 font-bold uppercase">{selectedEntry.botProfile}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-slate-400 block text-[10px] uppercase">Identity Hash (Doc ID):</span>
-              <div className="p-2.5 rounded bg-black/60 text-slate-300 break-all text-[11px]">
-                {selectedEntry.identityKey}
+              <div className="flex justify-between">
+                <span className="text-slate-400">Risk Assessment:</span>
+                <span className="text-emerald-400 font-bold">{selectedEntry.riskScore}/100</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Status:</span>
+                <span className="uppercase text-brand-yellow font-bold">{selectedEntry.status}</span>
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2">
-              <Button variant="ghost" size="md" onClick={() => setSelectedEntry(null)}>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button size="sm" variant="outline" onClick={() => setSelectedEntry(null)}>
                 Close
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={() => {
+                  handleAction(selectedEntry.identityKey, 'blocked');
+                  setSelectedEntry(null);
+                }}
+              >
+                Disqualify Entry
               </Button>
             </div>
           </div>
         </Modal>
       )}
-
     </div>
   );
 };

@@ -1,6 +1,6 @@
 // Fair Drop Shared Types & Interfaces
 
-export type UserRole = 'attendee' | 'organizer' | 'security' | 'readonly';
+export type UserRole = 'attendee' | 'organizer' | 'security' | 'readonly' | 'evaluator';
 
 export type DropMode = 'FAIR_DROP' | 'FCFS';
 

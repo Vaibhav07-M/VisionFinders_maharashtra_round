@@ -14,6 +14,7 @@ import {
   ArrowRight,
   CheckCircle2,
   AlertTriangle,
+  Loader2,
 } from 'lucide-react';
 
 export const WaitingRoomPage: React.FC = () => {
@@ -22,6 +23,16 @@ export const WaitingRoomPage: React.FC = () => {
   const { drops, getDrop, user } = useApp();
 
   const drop = getDrop(id || 'drop-jack-white-vault') || drops[0];
+
+  if (!drop) {
+    return (
+      <div className="py-32 flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+        <p className="text-xs font-mono text-slate-400">Loading waiting room from Firestore...</p>
+      </div>
+    );
+  }
+
   const [deviceChecked, setDeviceChecked] = useState(true);
   const [powWorkerReady, setPowWorkerReady] = useState(true);
   const [socketPing, setSocketPing] = useState(24);

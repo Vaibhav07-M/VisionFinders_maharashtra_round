@@ -2,9 +2,40 @@ import { Request, Response } from 'express';
 import { db, sha256Sync } from '../db/firestore';
 import { AuthenticatedRequest } from './auth';
 import { ipLimiter, accountLimiter, deviceLimiter, activeBlocklist, verifyPoW, computeRiskScore } from './abuse';
-import { DropEntry, Drop } from '../../shared/types';
+import { DropEntry, Drop, Reservation } from '../../shared/types';
 import { appendAuditRecord } from './audit';
 
+let onEntryCreatedCallback: ((dropId: string, stats: any) => void) | null = null;
+
+export function registerEntryListener(cb: (dropId: string, stats: any) => void) {
+  onEntryCreatedCallback = cb;
+}
+
+// GET /api/drops/:id/entries/me
+export function getUserEntryHandler(req: AuthenticatedRequest, res: Response) {
+  const { id: dropId } = req.params;
+  const uid = req.user?.uid || 'user_alex_77';
+  const email = req.user?.email || 'alex.chen@fairdrop.io';
+  const identityKey = sha256Sync(email);
+
+  // 1. Try finding entry by identityKey or UID
+  let entry = db.get(`drops/${dropId}/entries`, identityKey)?.data as DropEntry | undefined;
+  if (!entry) {
+    const all = db.list(`drops/${dropId}/entries`).map(d => d.data as DropEntry);
+    entry = all.find(e => e.uid === uid);
+  }
+
+  // 2. Find any active reservation for this user
+  const resId = `res_${dropId}_${uid}`;
+  const reservation = db.get(`drops/${dropId}/reservations`, resId)?.data as Reservation | undefined;
+
+  return res.json({
+    entry: entry || null,
+    reservation: reservation || null,
+  });
+}
+
+// POST /api/drops/:id/join
 export async function joinDropHandler(req: AuthenticatedRequest, res: Response) {
   const { id: dropId } = req.params;
   const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
@@ -52,9 +83,9 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   // 5. PROOF-OF-WORK VERIFICATION
   const { nonce, idempotencyKey } = req.body;
   const challenge = `${dropId}:${userUid}:${idempotencyKey}`;
-  const powValid = verifyPoW(challenge, Number(nonce || 0), drop.defenceConfig.powDifficulty || 4);
+  const powValid = verifyPoW(challenge, Number(nonce || 0), drop.defenceConfig?.powDifficulty ?? 2);
 
-  if (drop.defenceConfig.powEnabled && !powValid) {
+  if (drop.defenceConfig?.powEnabled && !powValid) {
     return res.status(400).json({
       error: 'INVALID_POW',
       message: 'Cryptographic proof-of-work challenge failed or incomplete.',
@@ -63,7 +94,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
 
   // 6. TIMING SIGNALS & RISK SCORING
   const { score: riskScore, signals } = computeRiskScore(req, powValid);
-  if (drop.defenceConfig.riskScoringEnabled && riskScore >= drop.defenceConfig.minRiskBlockScore) {
+  if (drop.defenceConfig?.riskScoringEnabled && riskScore >= (drop.defenceConfig?.minRiskBlockScore ?? 80)) {
     return res.status(403).json({
       error: 'RISK_SCORE_EXCEEDED',
       message: 'Entry blocked by automated behavioral risk evaluation.',
@@ -109,7 +140,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
     arrivedAt: now,
     serverTimestamp: Date.now(),
     riskScore,
-    status: riskScore >= drop.defenceConfig.minRiskChallengeScore ? 'flagged' : 'eligible',
+    status: riskScore >= (drop.defenceConfig?.minRiskChallengeScore ?? 50) ? 'flagged' : 'eligible',
     isBot: req.body.isBot || false,
     speedClass: req.body.speedClass || 'normal',
   };
@@ -120,14 +151,15 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
     db.set('idempotency', idempotencyKey, newEntry);
 
     // Update drop counter
-    db.set('drops', dropId, {
+    const updatedDrop = {
       totalEntriesCount: (drop.totalEntriesCount || 0) + 1,
       stats: {
         ...drop.stats,
         eligible: (drop.stats?.eligible || 0) + (newEntry.status === 'eligible' ? 1 : 0),
         flagged: (drop.stats?.flagged || 0) + (newEntry.status === 'flagged' ? 1 : 0),
       },
-    });
+    };
+    db.set('drops', dropId, updatedDrop);
 
     appendAuditRecord('ENTRY_RECORDED', userUid, {
       receiptId,
@@ -135,6 +167,10 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
       identityKey,
       riskScore,
     });
+
+    if (onEntryCreatedCallback) {
+      onEntryCreatedCallback(dropId, updatedDrop.stats);
+    }
 
     return res.status(201).json({
       isDuplicate: false,

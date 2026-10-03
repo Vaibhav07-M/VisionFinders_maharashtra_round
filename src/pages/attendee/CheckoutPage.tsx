@@ -14,6 +14,7 @@ import {
   AlertCircle,
   Lock,
   RotateCcw,
+  Loader2,
 } from 'lucide-react';
 
 export const CheckoutPage: React.FC = () => {
@@ -31,7 +32,26 @@ export const CheckoutPage: React.FC = () => {
   } = useApp();
 
   const drop = getDrop(id || 'drop-jack-white-vault') || drops[0];
-  const assignedSeat = seats.find(s => s.id === activeReservation?.seatId) || seats[12];
+
+  if (!drop) {
+    return (
+      <div className="py-32 flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+        <p className="text-xs font-mono text-slate-400">Loading checkout session from Firestore...</p>
+      </div>
+    );
+  }
+
+  const assignedSeat = seats.find(s => s.id === activeReservation?.seatId) || seats[0];
+
+  if (!assignedSeat) {
+    return (
+      <div className="py-32 flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+        <p className="text-xs font-mono text-slate-400">Retrieving assigned seat from Firestore...</p>
+      </div>
+    );
+  }
 
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'upi'>('card');
   const [isProcessing, setIsProcessing] = useState(false);

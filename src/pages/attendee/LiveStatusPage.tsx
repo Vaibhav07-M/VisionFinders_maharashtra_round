@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   RefreshCw,
   Zap,
+  Loader2,
 } from 'lucide-react';
 
 export const LiveStatusPage: React.FC = () => {
@@ -35,10 +36,20 @@ export const LiveStatusPage: React.FC = () => {
   } = useApp();
 
   const drop = getDrop(id || 'drop-jack-white-vault') || drops[0];
+
+  if (!drop) {
+    return (
+      <div className="py-32 flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+        <p className="text-xs font-mono text-slate-400">Loading live status from Firestore...</p>
+      </div>
+    );
+  }
+
   const userEntry = getUserEntry(drop.id);
 
-  // Live simulation tickers
-  const [liveEntries, setLiveEntries] = useState(drop.totalEntriesCount || 4218);
+  // Live real entry count from Firestore
+  const [liveEntries, setLiveEntries] = useState(drop.totalEntriesCount || 0);
   const [isDrawing, setIsDrawing] = useState(false);
 
   useEffect(() => {

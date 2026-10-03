@@ -1,42 +1,64 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
-import { Card, CardTitle, CardDescription } from '@/components/ui/Card';
+import { Card, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { ShieldAlert, Sliders, Shield, Zap, Lock, ListFilter, Plus, Trash2 } from 'lucide-react';
+import { ShieldAlert, Trash2, Loader2, AlertCircle, Save } from 'lucide-react';
+import { api } from '@/utils/api';
+import { SecurityConfig } from '../../../server/modules/abuse';
 
 export const SecurityRulesPage: React.FC = () => {
   const { addToast } = useApp();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [rateLimitIp, setRateLimitIp] = useState(15);
-  const [rateLimitAccount, setRateLimitAccount] = useState(30);
-  const [rateLimitDevice, setRateLimitDevice] = useState(30);
-  const [powDifficulty, setPowDifficulty] = useState(4);
+  const [rateLimitIp, setRateLimitIp] = useState(20);
+  const [rateLimitAccount, setRateLimitAccount] = useState(60);
+  const [rateLimitDevice, setRateLimitDevice] = useState(60);
+  const [powDifficulty, setPowDifficulty] = useState(2);
   const [turnstileActive, setTurnstileActive] = useState(true);
   const [honeypotActive, setHoneypotActive] = useState(true);
-
-  const [blocklist, setBlocklist] = useState<string[]>([
-    '198.51.100.42 (Known Datacenter Proxy)',
-    '203.0.113.88 (Scraper Cluster)',
-  ]);
+  const [blocklist, setBlocklist] = useState<string[]>([]);
   const [newBlockedIp, setNewBlockedIp] = useState('');
 
-  // Live hit counters for rules
-  const [ruleHits] = useState({
-    ipRateLimit: 4820,
-    accountRateLimit: 312,
-    deviceRateLimit: 198,
-    powChallengeFails: 840,
-    honeypotTraps: 54,
-    turnstileFails: 1240,
-  });
+  // Fetch security rules from Firestore
+  useEffect(() => {
+    let mounted = true;
+    const fetchRules = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await api.security.getRules();
+        if (mounted && res.config) {
+          setRateLimitIp(res.config.ipMaxRequests || 20);
+          setRateLimitAccount(res.config.accountMaxRequests || 60);
+          setRateLimitDevice(res.config.deviceMaxRequests || 60);
+          setPowDifficulty(res.config.powDifficulty || 2);
+          setTurnstileActive(res.config.turnstileEnabled !== false);
+          setHoneypotActive(res.config.honeypotEnabled !== false);
+          setBlocklist(res.config.blocklist || []);
+        }
+      } catch (err: any) {
+        if (mounted) setError(err.message || 'Failed to load security rules.');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    fetchRules();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleAddBlockedIp = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newBlockedIp.trim()) return;
-    setBlocklist(prev => [...prev, newBlockedIp.trim()]);
+    const ip = newBlockedIp.trim();
+    if (!blocklist.includes(ip)) {
+      setBlocklist(prev => [...prev, ip]);
+    }
     setNewBlockedIp('');
-    addToast('success', 'IP Blocked', `Added ${newBlockedIp} to active blocklist.`);
+    addToast('success', 'IP Blocked', `Added ${ip} to active blocklist.`);
   };
 
   const handleRemoveBlockedIp = (ip: string) => {
@@ -44,18 +66,62 @@ export const SecurityRulesPage: React.FC = () => {
     addToast('info', 'Block Removed', `Removed ${ip} from blocklist.`);
   };
 
-  const handleSaveRules = () => {
-    addToast('success', 'Security Policy Updated', 'Active defence thresholds synced to in-memory rate limiter.');
+  const handleSaveRules = async () => {
+    try {
+      setSaving(true);
+      const updates: Partial<SecurityConfig> = {
+        ipMaxRequests: rateLimitIp,
+        accountMaxRequests: rateLimitAccount,
+        deviceMaxRequests: rateLimitDevice,
+        powDifficulty,
+        turnstileEnabled: turnstileActive,
+        honeypotEnabled: honeypotActive,
+        blocklist,
+      };
+      const res = await api.security.updateRules(updates);
+      addToast(
+        'success',
+        'Security Rules Deployed',
+        'Policy committed to Firestore (securityConfig/global) & live rate limiters reconfigured.'
+      );
+    } catch (err: any) {
+      addToast('error', 'Deploy Failed', err.message);
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="py-24 flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+        <p className="text-xs font-mono text-slate-400">Loading security rules from Firestore...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-2xl mx-auto py-24 px-4">
+        <Card variant="default" className="border-rose-500/30 p-8 text-center space-y-4">
+          <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
+          <h2 className="text-lg font-stamp uppercase text-white font-bold">Failed to load security rules</h2>
+          <p className="text-xs text-slate-400 font-mono">{error}</p>
+          <Button onClick={() => window.location.reload()} size="sm" variant="primary">
+            Retry
+          </Button>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-8 pb-20">
-      
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-            <span>Panel B · Organizer</span>
+            <span>Panel B · Organizer & Security</span>
             <span>/</span>
             <span>B5. Security & Rate Limiting</span>
           </div>
@@ -64,34 +130,16 @@ export const SecurityRulesPage: React.FC = () => {
           </h1>
         </div>
 
-        <Button size="md" variant="primary" onClick={handleSaveRules}>
-          Save & Deploy Security Rules
+        <Button size="md" variant="primary" onClick={handleSaveRules} disabled={saving} leftIcon={<Save className="w-4 h-4" />}>
+          {saving ? 'Deploying...' : 'Save & Deploy Security Rules'}
         </Button>
       </div>
 
-      {/* Live Rule Hits Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        {[
-          { label: 'IP Rate Limit Hits', val: ruleHits.ipRateLimit, color: 'text-amber-400' },
-          { label: 'Account Limits', val: ruleHits.accountRateLimit, color: 'text-amber-400' },
-          { label: 'Device ID Limits', val: ruleHits.deviceRateLimit, color: 'text-amber-400' },
-          { label: 'PoW Fails', val: ruleHits.powChallengeFails, color: 'text-cyan-400' },
-          { label: 'Honeypot Trapped', val: ruleHits.honeypotTraps, color: 'text-rose-400' },
-          { label: 'Turnstile Blocks', val: ruleHits.turnstileFails, color: 'text-rose-400' },
-        ].map((stat, i) => (
-          <div key={i} className="p-3.5 rounded-xl bg-surface-100 border border-white/10 text-center">
-            <span className="text-[10px] font-mono text-slate-400 uppercase block">{stat.label}</span>
-            <span className={`text-2xl font-mono font-bold ${stat.color}`}>{stat.val.toLocaleString()}</span>
-          </div>
-        ))}
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
         {/* Left Column: Sliders & Thresholds */}
         <div className="lg:col-span-7 space-y-6">
           <Card variant="glass" className="space-y-6">
-            <CardTitle className="text-lg">Rate Limiting Thresholds (in-memory sliding window)</CardTitle>
+            <CardTitle className="text-lg">Rate Limiting Thresholds (Live sliding window)</CardTitle>
             
             <div className="space-y-5">
               <div className="space-y-2">
@@ -180,21 +228,21 @@ export const SecurityRulesPage: React.FC = () => {
                 </div>
                 <input
                   type="range"
-                  min={2}
-                  max={6}
+                  min={1}
+                  max={4}
                   value={powDifficulty}
                   onChange={e => setPowDifficulty(Number(e.target.value))}
                   className="w-full accent-cyan-400"
                 />
                 <span className="text-[11px] text-slate-500 block">
-                  Difficulty {powDifficulty} requires ~{Math.pow(16, powDifficulty).toLocaleString()} SHA-256 hash checks on client.
+                  Difficulty {powDifficulty} requires client to solve cryptographic SHA-256 challenge before submit.
                 </span>
               </div>
             </div>
           </Card>
         </div>
 
-        {/* Right Column: Blocklist & Allowlist */}
+        {/* Right Column: Blocklist */}
         <div className="lg:col-span-5 space-y-6">
           <Card variant="default" className="border-white/10 space-y-4">
             <CardTitle className="text-base flex items-center gap-2">
@@ -205,7 +253,7 @@ export const SecurityRulesPage: React.FC = () => {
             <form onSubmit={handleAddBlockedIp} className="flex gap-2">
               <input
                 type="text"
-                placeholder="192.0.2.1 / Subnet"
+                placeholder="198.51.100.42"
                 value={newBlockedIp}
                 onChange={e => setNewBlockedIp(e.target.value)}
                 className="flex-1 px-3 py-1.5 text-xs bg-surface-200 border border-white/10 rounded-lg text-white font-mono placeholder-slate-500 focus:outline-none focus:border-brand-yellow"
@@ -216,26 +264,28 @@ export const SecurityRulesPage: React.FC = () => {
             </form>
 
             <div className="space-y-2 max-h-60 overflow-y-auto">
-              {blocklist.map((ip, i) => (
-                <div
-                  key={i}
-                  className="p-2.5 rounded-lg bg-surface-200 border border-white/5 flex items-center justify-between text-xs font-mono"
-                >
-                  <span className="text-slate-300 truncate max-w-[200px]">{ip}</span>
-                  <button
-                    onClick={() => handleRemoveBlockedIp(ip)}
-                    className="text-slate-500 hover:text-rose-400 p-1"
+              {blocklist.length === 0 ? (
+                <p className="text-xs text-slate-500 italic p-2">No IPs currently blocked.</p>
+              ) : (
+                blocklist.map((ip, i) => (
+                  <div
+                    key={i}
+                    className="p-2.5 rounded-lg bg-surface-200 border border-white/5 flex items-center justify-between text-xs font-mono"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
+                    <span className="text-slate-300 truncate max-w-[200px]">{ip}</span>
+                    <button
+                      onClick={() => handleRemoveBlockedIp(ip)}
+                      className="text-slate-500 hover:text-rose-400 p-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </Card>
         </div>
-
       </div>
-
     </div>
   );
 };

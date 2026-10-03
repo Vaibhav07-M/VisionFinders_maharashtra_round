@@ -18,6 +18,7 @@ import {
   Users,
   Info,
   ExternalLink,
+  Loader2,
 } from 'lucide-react';
 
 export const DropDetailPage: React.FC = () => {
@@ -26,6 +27,16 @@ export const DropDetailPage: React.FC = () => {
   const { drops, getDrop, user, getUserEntry, addToast } = useApp();
 
   const drop = getDrop(id || 'drop-jack-white-vault') || drops[0];
+
+  if (!drop) {
+    return (
+      <div className="py-32 flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+        <p className="text-xs font-mono text-slate-400">Loading drop event from Firestore...</p>
+      </div>
+    );
+  }
+
   const userEntry = getUserEntry(drop.id);
   const [reminderSet, setReminderSet] = useState(false);
 

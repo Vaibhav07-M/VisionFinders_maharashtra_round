@@ -19,6 +19,8 @@ import {
   Sparkles,
 } from 'lucide-react';
 
+import { api } from '@/utils/api';
+
 export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initialMode = 'login' }) => {
   const navigate = useNavigate();
   const { user, loginAsPersona, addToast } = useApp();
@@ -26,20 +28,24 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
   const [authMethod, setAuthMethod] = useState<'password' | 'magic_link'>('password');
   const [email, setEmail] = useState('alex.chen@fairdrop.io');
-  const [password, setPassword] = useState('••••••••••••');
+  const [password, setPassword] = useState('Alex123!');
   const [turnstileVerified, setTurnstileVerified] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [showManualForm, setShowManualForm] = useState(false);
 
-  // 1-Click Instant Persona Login Handler
-  const handleInstantLogin = (personaKey: 'attendee' | 'organizer' | 'security' | 'evaluator') => {
-    loginAsPersona(personaKey);
-    const persona = DEMO_PERSONAS[personaKey];
-    addToast('success', '1-Click Login Successful', `Logged in as ${persona.displayName} (${persona.role.toUpperCase()})`);
-    navigate(persona.defaultRoute);
+  // 1-Click Instant Persona Login Handler backed by Firestore
+  const handleInstantLogin = async (personaKey: 'attendee' | 'organizer' | 'security' | 'evaluator') => {
+    setIsLoading(true);
+    try {
+      await loginAsPersona(personaKey);
+      const persona = DEMO_PERSONAS[personaKey];
+      navigate(persona.defaultRoute);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleManualSubmit = (e: React.FormEvent) => {
+  const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!turnstileVerified) {
       addToast('error', 'Bot Verification', 'Please complete the Cloudflare Turnstile challenge.');
@@ -47,24 +53,33 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
     }
 
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      // Determine role from email if recognizable, or default to attendee
-      if (email.includes('admin') || email.includes('organizer') || email.includes('elena')) {
-        loginAsPersona('organizer');
-        navigate('/admin');
-      } else if (email.includes('security') || email.includes('marcus')) {
-        loginAsPersona('security');
-        navigate('/admin/security');
-      } else if (email.includes('lab') || email.includes('aris') || email.includes('evaluator')) {
-        loginAsPersona('evaluator');
-        navigate('/lab/attack-designer');
-      } else {
-        loginAsPersona('attendee');
+    try {
+      if (mode === 'signup') {
+        const res = await api.auth.signup({
+          email,
+          password,
+          displayName: email.split('@')[0],
+          role: 'attendee',
+        });
+        localStorage.setItem('fairdrop_session_id', res.sessionId);
+        localStorage.setItem('fairdrop_user', JSON.stringify(res.user));
+        addToast('success', 'Account Created', `Created ${res.user.email} in Firestore.`);
         navigate('/');
+      } else {
+        const res = await api.auth.login({ email, password });
+        localStorage.setItem('fairdrop_session_id', res.sessionId);
+        localStorage.setItem('fairdrop_user', JSON.stringify(res.user));
+        addToast('success', 'Authenticated', `Signed in as ${res.user.email} from Firestore.`);
+        if (res.user.role === 'organizer') navigate('/admin');
+        else if (res.user.role === 'security') navigate('/admin/security');
+        else if (res.user.role === 'evaluator') navigate('/lab/attack-designer');
+        else navigate('/');
       }
-      addToast('success', 'Authenticated', `Signed in as ${email}. Server session initialized.`);
-    }, 400);
+    } catch (err: any) {
+      addToast('error', 'Authentication Failed', err.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

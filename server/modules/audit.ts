@@ -2,12 +2,12 @@ import { db, sha256Sync } from '../db/firestore';
 import { AuditRecord } from '../../shared/types';
 
 export function appendAuditRecord(action: string, actorUid: string, details: Record<string, any>): AuditRecord {
-  const records = db.list('auditLog');
-  const lastRecord = records.length > 0 ? records[records.length - 1].data as AuditRecord : null;
+  const records = db.list('auditLog').map(r => r.data as AuditRecord).sort((a, b) => a.index - b.index);
+  const lastRecord = records.length > 0 ? records[records.length - 1] : null;
   
   const prevHash = lastRecord ? lastRecord.hash : '0000000000000000000000000000000000000000000000000000000000000000';
   const timestamp = new Date().toISOString();
-  const index = records.length + 1;
+  const index = (lastRecord ? lastRecord.index : 0) + 1;
   const id = `audit-${index.toString().padStart(4, '0')}`;
 
   const payload = `${prevHash}|${action}|${timestamp}|${actorUid}|${JSON.stringify(details)}`;
@@ -28,8 +28,8 @@ export function appendAuditRecord(action: string, actorUid: string, details: Rec
   return newRecord;
 }
 
-export function verifyAuditHashChain(): { isValid: boolean; brokenIndex?: number; count: number } {
-  const records = db.list('auditLog').map(r => r.data as AuditRecord);
+export function verifyAuditHashChain(): { isValid: boolean; brokenIndex?: number; count: number; message?: string } {
+  const records = db.list('auditLog').map(r => r.data as AuditRecord).sort((a, b) => a.index - b.index);
   if (records.length === 0) return { isValid: true, count: 0 };
 
   for (let i = 1; i < records.length; i++) {
@@ -37,15 +37,15 @@ export function verifyAuditHashChain(): { isValid: boolean; brokenIndex?: number
     const curr = records[i];
 
     if (curr.prevHash !== prev.hash) {
-      return { isValid: false, brokenIndex: curr.index, count: records.length };
+      return { isValid: false, brokenIndex: curr.index, count: records.length, message: `Hash mismatch at record index ${curr.index}: prevHash does not match previous record hash.` };
     }
 
     const payload = `${curr.prevHash}|${curr.action}|${curr.timestamp}|${curr.actorUid}|${JSON.stringify(curr.details)}`;
     const recalculated = sha256Sync(payload);
     if (recalculated !== curr.hash) {
-      return { isValid: false, brokenIndex: curr.index, count: records.length };
+      return { isValid: false, brokenIndex: curr.index, count: records.length, message: `Payload recalculation mismatch at record index ${curr.index}.` };
     }
   }
 
-  return { isValid: true, count: records.length };
+  return { isValid: true, count: records.length, message: 'All audit blocks cryptographically verified.' };
 }

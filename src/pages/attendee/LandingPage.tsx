@@ -18,12 +18,22 @@ import {
   Lock,
   Users,
   CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 
 export const LandingPage: React.FC = () => {
   const { drops } = useApp();
   const [filter, setFilter] = useState<'all' | 'open' | 'scheduled' | 'completed'>('all');
   const [search, setSearch] = useState('');
+
+  if (drops.length === 0) {
+    return (
+      <div className="py-32 flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+        <p className="text-xs font-mono text-slate-400">Loading active drop catalog from Firestore...</p>
+      </div>
+    );
+  }
 
   const filteredDrops = drops.filter(drop => {
     const matchesFilter =

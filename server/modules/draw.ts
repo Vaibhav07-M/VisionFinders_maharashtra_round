@@ -40,13 +40,23 @@ export async function triggerDrawHandler(req: AuthenticatedRequest, res: Respons
   }
   const drop = dropDoc.data as Drop;
 
-  // Retrieve secret committed seed
-  const secretRecord = db.get('private_seeds', dropId);
-  const revealedSeed = secretRecord ? secretRecord.data.secretSeed : `SEED_REVEAL_${Date.now()}`;
+  // Retrieve or resume secret committed seed
+  let revealedSeed: string;
+  let lastAllocatedIndex = 0;
+
+  if (drop.drawState && drop.drawState.status === 'in_progress') {
+    // Resuming an interrupted draw
+    revealedSeed = drop.drawState.revealedSeed;
+    lastAllocatedIndex = drop.drawState.lastAllocatedIndex || 0;
+    console.log(`[DRAW] Resuming interrupted draw for drop ${dropId} from index ${lastAllocatedIndex}`);
+  } else {
+    const secretRecord = db.get('private_seeds', dropId);
+    revealedSeed = secretRecord ? secretRecord.data.secretSeed : `SEED_REVEAL_${Date.now()}`;
+  }
 
   // Freeze entries
   const allEntries = db.list(`drops/${dropId}/entries`).map(d => d.data as DropEntry);
-  const eligibleEntries = allEntries.filter(e => e.status === 'eligible');
+  const eligibleEntries = allEntries.filter(e => e.status === 'eligible' || e.status === 'selected' || e.status === 'not_selected');
 
   let rankedEntries: DropEntry[] = [];
 
@@ -67,89 +77,130 @@ export async function triggerDrawHandler(req: AuthenticatedRequest, res: Respons
   const winners = rankedEntries.slice(0, winnersCount);
   const waitlist = rankedEntries.slice(winnersCount);
 
-  // Retrieve available seats
-  const seats = db.list(`drops/${dropId}/seats`).map(d => d.data as Seat);
-  const availableSeats = seats.filter(s => s.status === 'available');
+  // Store draw progress in drop document BEFORE batch execution (Section 5 requirement)
+  db.set('drops', dropId, {
+    drawState: {
+      status: 'in_progress',
+      revealedSeed,
+      lastAllocatedIndex,
+      totalToAllocate: winnersCount,
+      totalEligible: eligibleEntries.length,
+      startedAt: drop.drawState?.startedAt || Date.now(),
+      lastBatchAt: Date.now(),
+    },
+  });
 
-  // ATOMIC ALLOCATION IN BATCHED WRITES (Max 500 ops per batch)
-  const batchOps: Array<any> = [];
+  // Retrieve seats
+  const seats = db.list(`drops/${dropId}/seats`).map(d => d.data as Seat);
   const now = new Date().toISOString();
   const holdExpiry = new Date(Date.now() + (drop.holdDurationSec || 300) * 1000).toISOString();
 
-  // 1. Assign winners to seats and mark hold reservations
-  winners.forEach((winner, idx) => {
-    const seat = availableSeats[idx] || seats[idx];
-    if (seat) {
-      // Seat held
-      batchOps.push({
-        type: 'set',
-        collection: `drops/${dropId}/seats`,
-        docId: seat.id,
-        data: {
-          ...seat,
-          status: 'held',
-          holderUid: winner.uid,
-          holdExpiresAt: holdExpiry,
-        },
-      });
+  // ATOMIC ALLOCATION IN MULTIPLE RESUMABLE BATCHES (<= 450 ops per batch, < 500 Firestore limit)
+  // Each winner involves 3 ops (seat, reservation, entry). 100 winners = 300 ops.
+  const WINNER_CHUNK_SIZE = 100;
 
-      // Reservation record
-      const resId = `res_${dropId}_${winner.uid}`;
-      const reservation: Reservation = {
-        id: resId,
-        dropId,
-        uid: winner.uid,
-        seatId: seat.id,
-        status: 'active',
-        expiresAt: holdExpiry,
-        createdAt: now,
-      };
-      batchOps.push({
-        type: 'set',
-        collection: `drops/${dropId}/reservations`,
-        docId: resId,
-        data: reservation,
-      });
+  for (let i = lastAllocatedIndex; i < winnersCount; i += WINNER_CHUNK_SIZE) {
+    const chunkEnd = Math.min(i + WINNER_CHUNK_SIZE, winnersCount);
+    const chunkWinners = winners.slice(i, chunkEnd);
+    const batchOps: Array<any> = [];
 
-      // Update entry status to selected
-      batchOps.push({
-        type: 'set',
-        collection: `drops/${dropId}/entries`,
-        docId: winner.identityKey,
-        data: {
-          ...winner,
-          status: 'selected',
-          drawRank: idx + 1,
-        },
-      });
+    chunkWinners.forEach((winner, offset) => {
+      const seatIndex = i + offset;
+      const seat = seats[seatIndex];
+      if (seat) {
+        const resId = `res_${dropId}_${winner.uid}`;
+        const existingRes = db.get(`drops/${dropId}/reservations`, resId);
+
+        // Idempotency: only allocate if not already allocated to this user
+        if (!existingRes || existingRes.data.status !== 'active') {
+          // 1. Seat hold
+          batchOps.push({
+            type: 'set',
+            collection: `drops/${dropId}/seats`,
+            docId: seat.id,
+            data: {
+              ...seat,
+              status: 'held',
+              holderUid: winner.uid,
+              holdExpiresAt: holdExpiry,
+            },
+          });
+
+          // 2. Reservation record
+          const reservation: Reservation = {
+            id: resId,
+            dropId,
+            uid: winner.uid,
+            seatId: seat.id,
+            status: 'active',
+            expiresAt: holdExpiry,
+            createdAt: now,
+          };
+          batchOps.push({
+            type: 'set',
+            collection: `drops/${dropId}/reservations`,
+            docId: resId,
+            data: reservation,
+          });
+
+          // 3. Winner entry marked selected
+          batchOps.push({
+            type: 'set',
+            collection: `drops/${dropId}/entries`,
+            docId: winner.identityKey,
+            data: {
+              ...winner,
+              status: 'selected',
+              drawRank: seatIndex + 1,
+            },
+          });
+        }
+      }
+    });
+
+    if (batchOps.length > 0) {
+      db.batchWrite(batchOps);
     }
-  });
 
-  // 2. Mark remaining as not_selected or waitlisted
-  waitlist.forEach((waitEntry, idx) => {
-    batchOps.push({
-      type: 'set',
+    // Persist progress checkpoint to Firestore
+    db.set('drops', dropId, {
+      drawState: {
+        status: 'in_progress',
+        revealedSeed,
+        lastAllocatedIndex: chunkEnd,
+        totalToAllocate: winnersCount,
+        lastBatchAt: Date.now(),
+      },
+    });
+  }
+
+  // Batch process waitlist entries in chunks of 450 ops
+  for (let w = 0; w < waitlist.length; w += 450) {
+    const waitlistChunk = waitlist.slice(w, w + 450);
+    const waitlistOps = waitlistChunk.map((waitEntry, idx) => ({
+      type: 'set' as const,
       collection: `drops/${dropId}/entries`,
       docId: waitEntry.identityKey,
       data: {
         ...waitEntry,
-        status: 'not_selected',
-        drawRank: winnersCount + idx + 1,
+        status: 'not_selected' as const,
+        drawRank: winnersCount + w + idx + 1,
       },
-    });
-  });
-
-  // Execute batch write atomically (Firestore max 500 limit respected)
-  // Split into chunks of 450 ops if needed
-  for (let i = 0; i < batchOps.length; i += 450) {
-    const chunk = batchOps.slice(i, i + 450);
-    db.batchWrite(chunk);
+    }));
+    db.batchWrite(waitlistOps);
   }
 
-  // Update drop state to 'drawn' with revealed seed
+  // Update drop to 'drawn' state with completed drawState
   db.set('drops', dropId, {
     status: 'drawn',
     revealedSeed,
+    drawState: {
+      status: 'completed',
+      revealedSeed,
+      lastAllocatedIndex: winnersCount,
+      totalToAllocate: winnersCount,
+      completedAt: Date.now(),
+    },
     stats: {
       ...drop.stats,
       allocated: winnersCount,
@@ -174,6 +225,11 @@ export async function triggerDrawHandler(req: AuthenticatedRequest, res: Respons
     dropId,
     revealedSeed,
     winnersCount,
+    drawState: {
+      status: 'completed',
+      lastAllocatedIndex: winnersCount,
+      totalToAllocate: winnersCount,
+    },
     invariants: invariantResult,
   });
 }

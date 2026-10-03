@@ -12,6 +12,14 @@ dist
 dist-ssr
 *.local
 
+# Local database state and credentials
+.firestore_state.json
+serviceAccountKey.json
+firebase-key.json
+firebase-service-account.json
+.env
+.env.local
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

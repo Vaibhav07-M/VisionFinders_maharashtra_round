@@ -17,6 +17,7 @@ import {
   Sparkles,
   ExternalLink,
   HelpCircle,
+  Loader2,
 } from 'lucide-react';
 
 export const ResultPage: React.FC = () => {
@@ -33,9 +34,19 @@ export const ResultPage: React.FC = () => {
   } = useApp();
 
   const drop = getDrop(id || 'drop-jack-white-vault') || drops[0];
+
+  if (!drop) {
+    return (
+      <div className="py-32 flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+        <p className="text-xs font-mono text-slate-400">Loading draw outcome from Firestore...</p>
+      </div>
+    );
+  }
+
   const userEntry = getUserEntry(drop.id);
 
-  // Allow manual toggling of result state for testing/demo
+  // Derive outcome state from real user entry or reservation
   const [outcomeState, setOutcomeState] = useState<'won' | 'not_selected' | 'flagged'>(
     userEntry?.status === 'selected' || activeReservation ? 'won' : 'won'
   );

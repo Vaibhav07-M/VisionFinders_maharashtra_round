@@ -1,17 +1,52 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
-import { Card, CardTitle, CardDescription } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Table, TableHead, TableBody, TableRow, TableCell, TableHeaderCell } from '@/components/ui/Table';
-import { LifeBuoy, CheckCircle2, XCircle, Clock, ShieldAlert } from 'lucide-react';
+import { LifeBuoy, CheckCircle2, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import { api } from '@/utils/api';
+import { Appeal } from '@shared/types';
 
 export const AppealsQueuePage: React.FC = () => {
-  const { appeals, decideAppeal } = useApp();
+  const { addToast } = useApp();
+  const [appeals, setAppeals] = useState<Appeal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchAppeals = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await api.appeals.list();
+      setAppeals(res.appeals || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load appeals.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAppeals();
+  }, []);
+
+  const handleDecide = async (id: string, status: 'approved' | 'rejected', notes: string) => {
+    try {
+      const res = await api.appeals.decide(id, status, notes);
+      setAppeals(prev => prev.map(a => (a.id === id ? res.appeal : a)));
+      addToast(
+        status === 'approved' ? 'success' : 'info',
+        'Appeal Decided',
+        `Appeal ${id} marked ${status.toUpperCase()} in Firestore.`
+      );
+    } catch (err: any) {
+      addToast('error', 'Decision Error', err.message);
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-8 pb-20">
-      
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
         <div>
@@ -30,7 +65,21 @@ export const AppealsQueuePage: React.FC = () => {
         </Badge>
       </div>
 
-      {appeals.length === 0 ? (
+      {loading ? (
+        <div className="py-24 flex flex-col items-center justify-center space-y-3">
+          <Loader2 className="w-8 h-8 text-brand-yellow animate-spin" />
+          <p className="text-xs font-mono text-slate-400">Loading appeals from Firestore...</p>
+        </div>
+      ) : error ? (
+        <Card variant="default" className="border-rose-500/30 p-8 text-center space-y-4">
+          <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
+          <h2 className="text-lg font-stamp uppercase text-white font-bold">Failed to load appeals</h2>
+          <p className="text-xs text-slate-400 font-mono">{error}</p>
+          <Button onClick={fetchAppeals} size="sm" variant="primary">
+            Retry
+          </Button>
+        </Card>
+      ) : appeals.length === 0 ? (
         <Card variant="glass" className="text-center py-12 space-y-3">
           <LifeBuoy className="w-8 h-8 text-slate-500 mx-auto" />
           <h3 className="text-base font-bold text-white font-display">No Flagged Appeals in Queue</h3>
@@ -90,7 +139,7 @@ export const AppealsQueuePage: React.FC = () => {
                       <Button
                         size="sm"
                         variant="primary"
-                        onClick={() => decideAppeal(appeal.id, 'approved', 'Identity verified.')}
+                        onClick={() => handleDecide(appeal.id, 'approved', 'Identity verified as genuine fan.')}
                         leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
                       >
                         Approve
@@ -98,7 +147,7 @@ export const AppealsQueuePage: React.FC = () => {
                       <Button
                         size="sm"
                         variant="danger"
-                        onClick={() => decideAppeal(appeal.id, 'rejected', 'Automated proxy cluster confirmed.')}
+                        onClick={() => handleDecide(appeal.id, 'rejected', 'Automated proxy cluster confirmed.')}
                         leftIcon={<XCircle className="w-3.5 h-3.5" />}
                       >
                         Reject
@@ -115,7 +164,6 @@ export const AppealsQueuePage: React.FC = () => {
           </TableBody>
         </Table>
       )}
-
     </div>
   );
 };

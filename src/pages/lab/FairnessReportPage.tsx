@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Card, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ChartWrapper } from '@/components/ui/ChartWrapper';
+import { api } from '@/utils/api';
+import { FairnessComparisonReport } from '@shared/types';
 import {
   ResponsiveContainer,
   BarChart,
@@ -16,60 +19,117 @@ import {
 } from 'recharts';
 import {
   Download,
-  Share2,
   ShieldCheck,
-  CheckCircle2,
-  TrendingDown,
-  TrendingUp,
-  AlertTriangle,
-  Cpu,
   FileSpreadsheet,
   Projector,
+  Loader2,
+  AlertCircle,
+  FlaskConical,
 } from 'lucide-react';
 
 export const FairnessReportPage: React.FC = () => {
-  const { fairnessComparison, latestTrialResult, addToast } = useApp();
-
+  const { addToast } = useApp();
+  const [report, setReport] = useState<FairnessComparisonReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isProjectorView, setIsProjectorView] = useState(false);
 
-  // Default comparison metrics if fresh boot
-  const report = fairnessComparison || {
-    timestamp: new Date().toISOString(),
-    scenarios: {
-      fairDrop: {
-        botAdvantageRatio: 1.05,
-        jainsFairnessIndex: 0.998,
-        giniCoefficient: 0.08,
-        fastConnectionSuccessRate: 0.0142,
-        slowConnectionSuccessRate: 0.0139,
-        throughputRps: 1890,
-        errorRate: 0.0004,
-        latencyP95Ms: 38,
-        recoveryTimeSec: 3.2,
-      },
-      fcfs: {
-        botAdvantageRatio: 6.42,
-        jainsFairnessIndex: 0.342,
-        giniCoefficient: 0.68,
-        fastConnectionSuccessRate: 0.048,
-        slowConnectionSuccessRate: 0.002,
-        throughputRps: 1420,
-        errorRate: 0.038,
-        latencyP95Ms: 145,
-        recoveryTimeSec: 8.4,
-      },
-    },
-    summary: {
-      speedAdvantageFairDrop: 1.02,
-      speedAdvantageFcfs: 24.0,
-      botAdvantageFairDrop: 1.05,
-      botAdvantageFcfs: 6.42,
-      giniFairDrop: 0.08,
-      giniFcfs: 0.68,
-      verdict:
-        'Fair Drop removes arrival speed and request volume as direct allocation advantages and eliminates single-shot sniper bots. FCFS allows automated bots to capture 83% of inventory due to millisecond latency disparities.',
-    },
+  useEffect(() => {
+    let mounted = true;
+    const fetchReport = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await api.simulation.getLatest();
+        if (mounted) {
+          if (res.report && res.report.scenarios?.fairDrop) {
+            setReport(res.report);
+          } else {
+            setReport(null);
+          }
+        }
+      } catch (err: any) {
+        if (mounted) setError(err.message || 'Failed to load report from database.');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    fetchReport();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleExportJson = () => {
+    if (!report) return;
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fair_drop_scientific_report_${Date.now()}.json`;
+    a.click();
+    addToast('success', 'JSON Exported', 'Fairness measurement data downloaded.');
   };
+
+  const handleExportCsv = () => {
+    if (!report) return;
+    const csvContent =
+      'Metric,FairDrop,FCFS_Control\n' +
+      `Bot Advantage Ratio,${report.scenarios.fairDrop.botAdvantageRatio},${report.scenarios.fcfs.botAdvantageRatio}\n` +
+      `Gini Coefficient,${report.scenarios.fairDrop.giniCoefficient},${report.scenarios.fcfs.giniCoefficient}\n` +
+      `Jains Fairness Index,${report.scenarios.fairDrop.jainsFairnessIndex},${report.scenarios.fcfs.jainsFairnessIndex}\n` +
+      `P95 Latency (ms),${report.scenarios.fairDrop.latencyP95Ms},${report.scenarios.fcfs.latencyP95Ms}\n`;
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fair_drop_benchmark_${Date.now()}.csv`;
+    a.click();
+    addToast('success', 'CSV Exported', 'Scientific benchmark table downloaded.');
+  };
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto py-24 px-4 flex flex-col items-center justify-center space-y-4">
+        <Loader2 className="w-10 h-10 text-brand-yellow animate-spin" />
+        <p className="text-sm font-mono text-slate-400">Loading stored simulation data from Firestore...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-3xl mx-auto py-24 px-4">
+        <Card variant="default" className="border-rose-500/30 p-8 text-center space-y-4">
+          <AlertCircle className="w-12 h-12 text-rose-400 mx-auto" />
+          <h2 className="text-xl font-stamp uppercase text-white font-bold">Error Loading Scientific Report</h2>
+          <p className="text-sm text-slate-400 font-mono">{error}</p>
+          <Button onClick={() => window.location.reload()} variant="primary" size="md">
+            Retry Loading
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!report) {
+    return (
+      <div className="max-w-3xl mx-auto py-24 px-4">
+        <Card variant="glass" className="p-8 text-center space-y-4">
+          <FlaskConical className="w-12 h-12 text-brand-yellow mx-auto" />
+          <h2 className="text-xl font-stamp uppercase text-white font-bold">No Simulation Results In Firestore</h2>
+          <p className="text-sm text-slate-400">
+            No stored simulation runs were found. Run a simulation trial in the Attack Designer to generate real benchmark evidence.
+          </p>
+          <Link to="/lab/attack-designer">
+            <Button variant="primary" size="md">
+              Open Attack Designer
+            </Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
 
   const chartData = [
     {
@@ -94,43 +154,12 @@ export const FairnessReportPage: React.FC = () => {
     },
   ];
 
-  const handleExportJson = () => {
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `fair_drop_scientific_report_${Date.now()}.json`;
-    a.click();
-    addToast('success', 'JSON Exported', 'Fairness measurement data downloaded.');
-  };
-
-  const handleExportCsv = () => {
-    const csvContent =
-      'Metric,FairDrop,FCFS_Control\n' +
-      `Bot Advantage Ratio,${report.scenarios.fairDrop.botAdvantageRatio},${report.scenarios.fcfs.botAdvantageRatio}\n` +
-      `Gini Coefficient,${report.scenarios.fairDrop.giniCoefficient},${report.scenarios.fcfs.giniCoefficient}\n` +
-      `Jains Fairness Index,${report.scenarios.fairDrop.jainsFairnessIndex},${report.scenarios.fcfs.jainsFairnessIndex}\n` +
-      `P95 Latency (ms),${report.scenarios.fairDrop.latencyP95Ms},${report.scenarios.fcfs.latencyP95Ms}\n`;
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `fair_drop_benchmark_${Date.now()}.csv`;
-    a.click();
-    addToast('success', 'CSV Exported', 'Scientific benchmark table downloaded.');
-  };
-
-  const handlePrintPdf = () => {
-    window.print();
-  };
-
   return (
     <div
       className={`max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-10 pb-20 ${
         isProjectorView ? 'bg-black text-white text-lg' : ''
       }`}
     >
-      
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
         <div>
@@ -138,7 +167,7 @@ export const FairnessReportPage: React.FC = () => {
             <span className="font-stamp text-xs px-2.5 py-0.5 rounded bg-emerald-500 text-black font-extrabold uppercase">
               OFFICIAL SCIENTIFIC VERDICT
             </span>
-            <span className="text-xs font-mono text-slate-400">BENCHMARK REPORT</span>
+            <span className="text-xs font-mono text-slate-400">FIRESTORE PERSISTED BENCHMARK</span>
           </div>
           <h1
             className={`font-stamp font-black uppercase tracking-tight mt-1 ${
@@ -192,7 +221,7 @@ export const FairnessReportPage: React.FC = () => {
       <Card variant="glass" className="space-y-4">
         <CardTitle className="text-xl">Head-to-Head Comparison: Fair Drop vs FCFS Control</CardTitle>
         <CardDescription>
-          Measured across 50,000 competing virtual clients under identical bot assault conditions.
+          Measured from stored trial results under identical bot assault conditions.
         </CardDescription>
 
         <div className="overflow-x-auto rounded-xl border border-white/10 mt-4">
@@ -218,26 +247,42 @@ export const FairnessReportPage: React.FC = () => {
               </tr>
               <tr>
                 <td className="p-4 font-bold text-white">Fast vs Slow Connection Odds</td>
-                <td className="p-4 text-emerald-400">1.02x (Completely Neutral)</td>
-                <td className="p-4 text-rose-400">24.0x (Slow Connections Starve)</td>
+                <td className="p-4 text-emerald-400">
+                  {report.summary.speedAdvantageFairDrop}x (Completely Neutral)
+                </td>
+                <td className="p-4 text-rose-400">
+                  {report.summary.speedAdvantageFcfs}x (Slow Connections Starve)
+                </td>
                 <td className="p-4 text-slate-400">Arrival latency inside window confers 0 advantage.</td>
               </tr>
               <tr>
                 <td className="p-4 font-bold text-white">Jain's Fairness Index</td>
-                <td className="p-4 text-emerald-400">0.998 / 1.000</td>
-                <td className="p-4 text-amber-400">0.342 / 1.000</td>
+                <td className="p-4 text-emerald-400">
+                  {report.scenarios.fairDrop.jainsFairnessIndex} / 1.000
+                </td>
+                <td className="p-4 text-amber-400">
+                  {report.scenarios.fcfs.jainsFairnessIndex} / 1.000
+                </td>
                 <td className="p-4 text-slate-400">Uniform probability distribution confirmed.</td>
               </tr>
               <tr>
                 <td className="p-4 font-bold text-white">Gini Inequality Coefficient</td>
-                <td className="p-4 text-emerald-400">0.08 (Equitable)</td>
-                <td className="p-4 text-rose-400">0.68 (Extreme Concentration)</td>
+                <td className="p-4 text-emerald-400">
+                  {report.scenarios.fairDrop.giniCoefficient} (Equitable)
+                </td>
+                <td className="p-4 text-rose-400">
+                  {report.scenarios.fcfs.giniCoefficient} (Extreme Concentration)
+                </td>
                 <td className="p-4 text-slate-400">FCFS leads to winner-take-all bot monopolies.</td>
               </tr>
               <tr>
                 <td className="p-4 font-bold text-white">P95 System Latency</td>
-                <td className="p-4 text-white">38 ms</td>
-                <td className="p-4 text-slate-300">145 ms</td>
+                <td className="p-4 text-white">
+                  {report.scenarios.fairDrop.latencyP95Ms} ms
+                </td>
+                <td className="p-4 text-slate-300">
+                  {report.scenarios.fcfs.latencyP95Ms} ms
+                </td>
                 <td className="p-4 text-slate-400">Multi-tier request shedding shields compute.</td>
               </tr>
               <tr>
@@ -278,7 +323,6 @@ export const FairnessReportPage: React.FC = () => {
           </BarChart>
         </ResponsiveContainer>
       </ChartWrapper>
-
     </div>
   );
 };
