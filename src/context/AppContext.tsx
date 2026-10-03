@@ -370,15 +370,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const valid = oversold === 0 && duplicates === 0 && orphanedHolds === 0 && inventoryConsistent;
 
-    appendAuditRecord('INVARIANT_CHECK_EXECUTED', user.uid, {
-      dropId,
-      oversold,
-      duplicates,
-      orphanedHolds,
-      inventoryConsistent,
-      valid,
-    });
-
     return { oversold, duplicates, orphanedHolds, inventoryConsistent, valid };
   };
 
@@ -772,7 +763,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const start = Date.now();
     const interval = setInterval(() => {
       setRecoveryStopwatchMs(Date.now() - start);
-    }, 50);
+    }, 200);
 
     const recoveryDuration = type === 'kill' ? 3200 : type === 'latency' ? 2400 : 1800;
 

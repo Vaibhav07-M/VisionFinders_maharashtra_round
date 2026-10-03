@@ -36,6 +36,7 @@ export const CheckoutPage: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'upi'>('card');
   const [isProcessing, setIsProcessing] = useState(false);
   const [payIdempotencyKey] = useState<string>(() => `pay_idemp_${Date.now().toString(36)}`);
+  const [holdExpiryDate] = useState<string>(() => activeReservation?.expiresAt || new Date(Date.now() + 1000 * 280).toISOString());
 
   const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,7 +95,7 @@ export const CheckoutPage: React.FC = () => {
                   If this timer expires, the seat is forfeited to the waitlist.
                 </span>
               </div>
-              <Countdown targetDate={new Date(Date.now() + 1000 * 280).toISOString()} size="md" />
+              <Countdown targetDate={holdExpiryDate} size="md" />
             </div>
 
             {/* Payment Method Switcher */}

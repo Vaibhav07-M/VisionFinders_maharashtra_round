@@ -43,6 +43,7 @@ export const ResultPage: React.FC = () => {
   const [appealModalOpen, setAppealModalOpen] = useState(false);
   const [appealReason, setAppealReason] = useState('');
   const [appealSubmitted, setAppealSubmitted] = useState(false);
+  const [holdExpiryDate] = useState<string>(() => new Date(Date.now() + 1000 * 300).toISOString());
 
   useEffect(() => {
     if (outcomeState === 'won') {
@@ -125,7 +126,7 @@ export const ResultPage: React.FC = () => {
             </span>
             <div className="flex justify-center">
               <Countdown
-                targetDate={new Date(Date.now() + 1000 * 300).toISOString()}
+                targetDate={holdExpiryDate}
                 size="lg"
               />
             </div>

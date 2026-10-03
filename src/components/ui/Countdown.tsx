@@ -13,8 +13,18 @@ export const Countdown: React.FC<CountdownProps> = ({
   size = 'md',
   showLabels = true,
 }) => {
-  const calculateTimeLeft = () => {
-    const diff = new Date(targetDate).getTime() - Date.now();
+  const targetTime = React.useMemo(() => {
+    try {
+      return new Date(targetDate).getTime();
+    } catch (_) {
+      return Date.now();
+    }
+  }, [typeof targetDate === 'string' ? targetDate : (targetDate as Date)?.getTime?.()]);
+
+  const hasExpiredRef = React.useRef(false);
+
+  const calculateTimeLeft = React.useCallback(() => {
+    const diff = targetTime - Date.now();
     if (diff <= 0) {
       return { days: 0, hours: 0, minutes: 0, seconds: 0, expired: true };
     }
@@ -25,21 +35,35 @@ export const Countdown: React.FC<CountdownProps> = ({
       seconds: Math.floor((diff / 1000) % 60),
       expired: false,
     };
-  };
+  }, [targetTime]);
 
-  const [timeLeft, setTimeLeft] = useState(calculateTimeLeft());
+  const [timeLeft, setTimeLeft] = useState(calculateTimeLeft);
 
   useEffect(() => {
+    hasExpiredRef.current = false;
+    const initial = calculateTimeLeft();
+    setTimeLeft(initial);
+    if (initial.expired) {
+      if (!hasExpiredRef.current) {
+        hasExpiredRef.current = true;
+        onExpire?.();
+      }
+      return;
+    }
+
     const timer = setInterval(() => {
       const updated = calculateTimeLeft();
       setTimeLeft(updated);
       if (updated.expired) {
         clearInterval(timer);
-        onExpire?.();
+        if (!hasExpiredRef.current) {
+          hasExpiredRef.current = true;
+          onExpire?.();
+        }
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [targetDate]);
+  }, [targetTime, calculateTimeLeft, onExpire]);
 
   const pad = (n: number) => n.toString().padStart(2, '0');
 
