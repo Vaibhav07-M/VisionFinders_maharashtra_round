@@ -25667,6 +25667,32 @@
       },
       "createdAt": 1791034912290,
       "updatedAt": 1791034912386
+    },
+    "sess_musgplzz_q49hpp": {
+      "id": "sess_musgplzz_q49hpp",
+      "data": {
+        "sessionId": "sess_musgplzz_q49hpp",
+        "uid": "user_marcus_organizer",
+        "deviceId": "web_client",
+        "ipHash": "12ca17b49af2289436f303e0166030a21e525d266e209267433801a8fd4071a0",
+        "createdAt": 1791036201887,
+        "lastSeenAt": 1791036201887
+      },
+      "createdAt": 1791036201887,
+      "updatedAt": 1791036201887
+    },
+    "sess_musgpm0k_9pwhl3": {
+      "id": "sess_musgpm0k_9pwhl3",
+      "data": {
+        "sessionId": "sess_musgpm0k_9pwhl3",
+        "uid": "user_marcus_organizer",
+        "deviceId": "web_client",
+        "ipHash": "12ca17b49af2289436f303e0166030a21e525d266e209267433801a8fd4071a0",
+        "createdAt": 1791036201908,
+        "lastSeenAt": 1791036201988
+      },
+      "createdAt": 1791036201908,
+      "updatedAt": 1791036201988
     }
   },
   "identities": {
