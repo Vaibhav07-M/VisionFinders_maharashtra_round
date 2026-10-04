@@ -17,8 +17,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
-  ArrowRight,
-  RotateCcw,
+  ShieldAlert,
 } from 'lucide-react';
 
 export const DropDetailPage: React.FC = () => {
@@ -100,14 +99,21 @@ export const DropDetailPage: React.FC = () => {
     userDropState?.entry?.status === 'waitlisted' ||
     (userDropState?.waitlistPosition !== null && userDropState?.waitlistPosition !== undefined);
 
-  // 5. ENTERED
-  const isEntered =
-    Boolean(userDropState?.entry && userDropState.entry.status === 'entered');
+  // 5. BLOCKED
+  const isBlocked =
+    Boolean(userDropState?.entry && userDropState.entry.status === 'blocked');
 
-  // 6. WINDOW OPEN, not entered
+  // 6. ENTERED (Active in draw pool: 'entered', 'eligible', or 'flagged')
+  const isEntered =
+    Boolean(
+      userDropState?.entry &&
+      ['entered', 'eligible', 'flagged'].includes(userDropState.entry.status)
+    );
+
+  // 7. WINDOW OPEN, not entered
   const isWindowOpen = drop.status === 'open';
 
-  // 7. UPCOMING
+  // 8. UPCOMING
   const isUpcoming = drop.status === 'scheduled';
 
   // Format draw time HH:MM
@@ -115,8 +121,8 @@ export const DropDetailPage: React.FC = () => {
   const formattedDrawTime = drawDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   // Handlers
-  const handleJoin = async (preferences: string[]) => {
-    await submitJoin(drop.id, preferences);
+  const handleJoin = async (preferences: string[], websiteTrap?: string) => {
+    await submitJoin(drop.id, preferences, websiteTrap);
     await fetchUserDropState(drop.id);
   };
 
@@ -227,8 +233,37 @@ export const DropDetailPage: React.FC = () => {
         />
       )}
 
+      {/* STATE 3B: BLOCKED / SUSPENDED -> Show review notice + link to appeals */}
+      {!isPaid && !isOffered && !isWaitlisted && isBlocked && (
+        <div className="p-8 sm:p-10 rounded-3xl bg-rose-950/20 border-2 border-rose-500/40 text-center space-y-6 shadow-2xl animate-fadeIn">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-rose-500/15 text-rose-400 border border-rose-500/30 flex items-center justify-center">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-xs font-mono font-bold uppercase tracking-wider text-rose-400 block">
+              Registration Suspended
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-stamp font-black text-white uppercase tracking-tight">
+              Entry Under Security Review
+            </h2>
+            <p className="text-sm text-slate-300 max-w-md mx-auto">
+              Your entry was flagged by automated security signals or moderator policy checks. If you believe this is an error, you can submit an appeal for human review.
+            </p>
+          </div>
+
+          <div className="pt-2 flex justify-center gap-3">
+            <Link to="/appeals">
+              <Button size="md" variant="primary" className="bg-rose-500 hover:bg-rose-600 text-white font-semibold">
+                Submit an Appeal
+              </Button>
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* STATE 4: ENTERED -> "You're in. Draw at HH:MM." + [ Edit preferences ] */}
-      {!isPaid && !isOffered && !isWaitlisted && isEntered && (
+      {!isPaid && !isOffered && !isWaitlisted && !isBlocked && isEntered && (
         <div className="space-y-6">
           {isEditingPreferences ? (
             <div className="p-6 rounded-3xl bg-surface-100 border border-white/15">
@@ -249,9 +284,21 @@ export const DropDetailPage: React.FC = () => {
               </div>
 
               <div className="space-y-2">
-                <span className="text-xs font-mono font-bold uppercase tracking-wider text-emerald-400 block">
-                  Entry Confirmed
-                </span>
+                <div className="flex items-center justify-center gap-2">
+                  <span className={`text-xs font-mono font-bold uppercase tracking-wider px-2.5 py-0.5 rounded border inline-block ${
+                    userDropState?.entry?.status === 'eligible'
+                      ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                      : userDropState?.entry?.status === 'flagged'
+                      ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
+                      : 'text-brand-yellow bg-brand-yellow/10 border-brand-yellow/30'
+                  }`}>
+                    {userDropState?.entry?.status === 'eligible'
+                      ? 'Verified & Eligible'
+                      : userDropState?.entry?.status === 'flagged'
+                      ? 'Entry Under Review'
+                      : 'Entry Confirmed'}
+                  </span>
+                </div>
                 <h2 className="text-3xl sm:text-4xl font-stamp font-black text-white uppercase tracking-tight">
                   You're in. Draw at {formattedDrawTime}.
                 </h2>
@@ -356,7 +403,7 @@ export const DropDetailPage: React.FC = () => {
       )}
 
       {/* STATE 6: WINDOW OPEN, NOT ENTERED -> "Pick your tiers" then [ Enter draw ] */}
-      {!isPaid && !isOffered && !isWaitlisted && !isEntered && !isExpiredOrReleased && isWindowOpen && (
+      {!isPaid && !isOffered && !isWaitlisted && !isBlocked && !isEntered && !isExpiredOrReleased && isWindowOpen && (
         <div className="space-y-8">
           {/* Window countdown */}
           <div className="p-4 rounded-2xl bg-surface-100 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -395,7 +442,7 @@ export const DropDetailPage: React.FC = () => {
       )}
 
       {/* STATE 7: UPCOMING -> Countdown + "Remind me" */}
-      {!isPaid && !isOffered && !isWaitlisted && !isEntered && isUpcoming && (
+      {!isPaid && !isOffered && !isWaitlisted && !isBlocked && !isEntered && isUpcoming && (
         <div className="p-8 sm:p-12 rounded-3xl bg-[#0d0e17] border border-white/15 text-center space-y-6 shadow-2xl">
           <span className="text-xs font-mono font-bold uppercase tracking-wider text-cyan-400 block">
             Upcoming Drop Event
@@ -427,7 +474,7 @@ export const DropDetailPage: React.FC = () => {
       )}
 
       {/* STATE 8: NOT ENTERED AFTER CLOSE -> Live seat board (read-only) + next-round link */}
-      {!isPaid && !isOffered && !isWaitlisted && !isEntered && !isWindowOpen && !isUpcoming && (
+      {!isPaid && !isOffered && !isWaitlisted && !isBlocked && !isEntered && !isWindowOpen && !isUpcoming && (
         <div className="space-y-6">
           <div className="p-6 rounded-2xl bg-surface-100 border border-white/10 text-center space-y-2">
             <h2 className="text-xl font-stamp font-bold text-white uppercase">

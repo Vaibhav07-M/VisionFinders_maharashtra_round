@@ -493,12 +493,17 @@ router.get('/drops/:id/entries', (req: Request, res: Response) => {
 
   let entries = db.list(`drops/${id}/entries`).map(d => d.data as DropEntry);
 
-  // Search filter (identityKey, ipHash, receipt)
+  // Search filter (identityKey, uid, receiptId, ipHash, ip, deviceId, status)
   if (search) {
     entries = entries.filter(e =>
       (e.identityKey && e.identityKey.toLowerCase().includes(search)) ||
+      (e.uid && e.uid.toLowerCase().includes(search)) ||
+      (e.receiptId && e.receiptId.toLowerCase().includes(search)) ||
+      (e.receipt && e.receipt.toLowerCase().includes(search)) ||
       (e.ipHash && e.ipHash.toLowerCase().includes(search)) ||
-      (e.receipt && e.receipt.toLowerCase().includes(search))
+      (e.ip && e.ip.toLowerCase().includes(search)) ||
+      (e.deviceId && e.deviceId.toLowerCase().includes(search)) ||
+      (e.status && e.status.toLowerCase().includes(search))
     );
   }
 
@@ -546,14 +551,14 @@ router.get('/drops/:id/entries', (req: Request, res: Response) => {
   });
 });
 
-// POST /api/admin/drops/:id/entries/:identityKey/action (flag, ban, clear with reason)
+// POST /api/admin/drops/:id/entries/:identityKey/action (flag, ban, clear, reset with reason)
 router.post('/drops/:id/entries/:identityKey/action', disallowReadOnly, (req: Request, res: Response) => {
   const id = req.params.id as string;
   const identityKey = req.params.identityKey as string;
   const { action, reason } = req.body;
 
-  if (!['flag', 'ban', 'clear'].includes(action)) {
-    return res.status(400).json({ error: 'Invalid action. Allowed: flag, ban, clear' });
+  if (!['flag', 'ban', 'clear', 'reset'].includes(action)) {
+    return res.status(400).json({ error: 'Invalid action. Allowed: flag, ban, clear, reset' });
   }
 
   if (!reason || typeof reason !== 'string' || reason.trim().length < 3) {
@@ -565,6 +570,31 @@ router.post('/drops/:id/entries/:identityKey/action', disallowReadOnly, (req: Re
 
   const entry = entryDoc.data as DropEntry;
   const prevStatus = entry.status;
+
+  if (action === 'reset') {
+    db.delete(`drops/${id}/entries`, identityKey);
+    if (entry.idempotencyKey) {
+      db.delete('idempotency', entry.idempotencyKey);
+    }
+    const dropDoc = db.get('drops', id);
+    if (dropDoc) {
+      const dropData = dropDoc.data as any;
+      if (dropData.totalEntriesCount && dropData.totalEntriesCount > 0) {
+        dropData.totalEntriesCount -= 1;
+        db.set('drops', id, dropData);
+      }
+    }
+
+    appendAuditRecord('ENTRY_RESET', getActor(req), {
+      dropId: id,
+      identityKey,
+      action: 'reset',
+      reason: reason.trim(),
+      previousStatus: prevStatus,
+    });
+
+    return res.json({ success: true, message: `Entry reset and purged. User can now submit a fresh entry.` });
+  }
 
   if (action === 'ban') {
     entry.status = 'blocked';
@@ -601,8 +631,8 @@ router.post('/drops/:id/entries/bulk', disallowReadOnly, (req: Request, res: Res
     return res.status(400).json({ error: 'identityKeys must be a non-empty array' });
   }
 
-  if (!['flag', 'ban', 'clear'].includes(action)) {
-    return res.status(400).json({ error: 'Invalid action. Allowed: flag, ban, clear' });
+  if (!['flag', 'ban', 'clear', 'reset'].includes(action)) {
+    return res.status(400).json({ error: 'Invalid action. Allowed: flag, ban, clear, reset' });
   }
 
   if (!reason || typeof reason !== 'string' || reason.trim().length < 3) {
@@ -614,15 +644,22 @@ router.post('/drops/:id/entries/bulk', disallowReadOnly, (req: Request, res: Res
     const doc = db.get(`drops/${id}/entries`, key);
     if (doc) {
       const entry = doc.data as DropEntry;
-      if (action === 'ban') {
+      if (action === 'reset') {
+        db.delete(`drops/${id}/entries`, key);
+        if (entry.idempotencyKey) {
+          db.delete('idempotency', entry.idempotencyKey);
+        }
+      } else if (action === 'ban') {
         entry.status = 'blocked';
         if (entry.ipHash) activeBlocklist.add(entry.ipHash);
+        db.set(`drops/${id}/entries`, key, entry);
       } else if (action === 'flag') {
         entry.status = 'flagged';
+        db.set(`drops/${id}/entries`, key, entry);
       } else if (action === 'clear') {
         entry.status = 'eligible';
+        db.set(`drops/${id}/entries`, key, entry);
       }
-      db.set(`drops/${id}/entries`, key, entry);
       updatedCount++;
     }
   }

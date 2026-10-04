@@ -58,7 +58,7 @@ interface AppContextType {
   userDropState: UserDropState | null;
   fetchUserDropState: (dropId: string) => Promise<UserDropState>;
   activeOffer: Offer | null;
-  submitJoin: (dropId: string, preferences: string[]) => Promise<{ entry: DropEntry; isDuplicate: boolean }>;
+  submitJoin: (dropId: string, preferences: string[], websiteTrap?: string) => Promise<{ entry: DropEntry; isDuplicate: boolean }>;
   updatePreferences: (dropId: string, preferences: string[]) => Promise<DropEntry>;
   payOffer: (offerId: string) => Promise<Ticket>;
   releaseOffer: (offerId: string) => Promise<void>;
@@ -70,7 +70,8 @@ interface AppContextType {
   submitEntry: (
     dropId: string,
     idempotencyKey: string,
-    powProof: { nonce: number; hash: string }
+    powProof: { nonce: number; hash: string },
+    websiteTrap?: string
   ) => Promise<{ entry: DropEntry; isDuplicate: boolean }>;
 
   // Seats & Reservations
@@ -470,12 +471,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const submitEntry = async (
     dropId: string,
     idempotencyKey: string,
-    powProof: { nonce: number; hash: string }
+    powProof: { nonce: number; hash: string },
+    websiteTrap?: string
   ): Promise<{ entry: DropEntry; isDuplicate: boolean }> => {
     try {
       const res = await api.entry.join(dropId, {
         nonce: powProof.nonce,
         idempotencyKey,
+        website_trap: websiteTrap,
       });
 
       if (res.isDuplicate) {
@@ -560,7 +563,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const submitJoin = async (dropId: string, preferences: string[]): Promise<{ entry: DropEntry; isDuplicate: boolean }> => {
+  const submitJoin = async (dropId: string, preferences: string[], websiteTrap?: string): Promise<{ entry: DropEntry; isDuplicate: boolean }> => {
     try {
       const idempotencyKey = `idemp_${user.uid}_${dropId}`;
       const dropDoc = drops.find(d => d.id === dropId);
@@ -577,6 +580,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         idempotencyKey,
         preferences,
         nonce,
+        website_trap: websiteTrap,
       });
       if (res.isDuplicate) {
         addToast('info', 'Already Entered', 'Using your existing verified entry.');
@@ -584,7 +588,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addToast('success', 'Entered Draw', 'Preferences recorded. Draw runs when window closes.');
       }
       setEntries(prev => [res.entry, ...prev.filter(e => e.identityKey !== res.entry.identityKey)]);
-      setUserDropState(prev => prev ? { ...prev, entry: res.entry } : null);
+      setUserDropState(prev => prev ? { ...prev, entry: res.entry } : {
+        dropId,
+        entry: res.entry,
+        offer: null,
+        waitlistPosition: null,
+        totalWaitlisted: 0,
+        ticket: null,
+      });
       return { entry: res.entry, isDuplicate: res.isDuplicate };
     } catch (err: any) {
       addToast('error', 'Entry Failed', err.message);

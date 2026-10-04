@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useOutletContext } from 'react-router-dom';
 import { PageHeader } from '@/components/admin/PageHeader';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { Drawer } from '@/components/admin/Drawer';
@@ -27,11 +27,33 @@ import { getAdminHeaders } from '@/utils/api';
 export const EntriesUsersPage: React.FC = () => {
   const { drops, addToast } = useApp();
   const [searchParams] = useSearchParams();
+  const outlet = useOutletContext<{ selectedDropId?: string }>();
 
-  // Drop selection
+  // Drop selection synced with AdminLayout top slicer
   const [selectedDropId, setSelectedDropId] = useState<string>(() => {
-    return searchParams.get('dropId') || localStorage.getItem('fairdrop_selected_drop') || 'drop-jack-white-vault';
+    return (
+      outlet?.selectedDropId ||
+      searchParams.get('dropId') ||
+      localStorage.getItem('fairdrop_admin_active_drop') ||
+      'drop-jack-white-vault'
+    );
   });
+
+  useEffect(() => {
+    if (outlet?.selectedDropId && outlet.selectedDropId !== selectedDropId) {
+      setSelectedDropId(outlet.selectedDropId);
+    }
+  }, [outlet?.selectedDropId]);
+
+  useEffect(() => {
+    const handleDropChanged = (e: any) => {
+      if (e.detail?.dropId && e.detail.dropId !== selectedDropId) {
+        setSelectedDropId(e.detail.dropId);
+      }
+    };
+    window.addEventListener('admin:activeDropChanged', handleDropChanged);
+    return () => window.removeEventListener('admin:activeDropChanged', handleDropChanged);
+  }, [selectedDropId]);
 
   // Table state
   const [entries, setEntries] = useState<any[]>([]);
@@ -56,7 +78,7 @@ export const EntriesUsersPage: React.FC = () => {
   // Action dialogs
   const [actionDialog, setActionDialog] = useState<{
     isOpen: boolean;
-    action: 'flag' | 'ban' | 'clear' | null;
+    action: 'flag' | 'ban' | 'clear' | 'reset' | null;
     identityKey: string | null;
     isBulk: boolean;
   }>({
@@ -245,9 +267,16 @@ export const EntriesUsersPage: React.FC = () => {
               className="p-1 hover:bg-emerald-500/20 text-emerald-400 rounded transition-colors"
               title="Clear to Eligible"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <CheckCircle2 className="w-3.5 h-3.5" />
             </button>
           )}
+          <button
+            onClick={() => setActionDialog({ isOpen: true, action: 'reset', identityKey: row.identityKey, isBulk: false })}
+            className="p-1 hover:bg-slate-500/20 text-slate-400 hover:text-slate-200 rounded transition-colors"
+            title="Reset Entry (Purge to Allow Re-entry)"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
         </div>
       ),
     },
@@ -262,18 +291,8 @@ export const EntriesUsersPage: React.FC = () => {
         badgeVariant="primary"
         action={
           <div className="flex items-center gap-3">
-            <select
-              value={selectedDropId}
-              onChange={(e) => setSelectedDropId(e.target.value)}
-              className="bg-surface-200 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-brand-yellow"
-            >
-              {drops.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
             <Button size="sm" variant="secondary" onClick={fetchEntries} isLoading={loading}>
+              <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
               Refresh
             </Button>
           </div>
@@ -343,6 +362,14 @@ export const EntriesUsersPage: React.FC = () => {
             >
               Clear
             </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-xs h-7 py-0 text-slate-400 hover:text-white"
+              onClick={() => setActionDialog({ isOpen: true, action: 'reset', identityKey: null, isBulk: true })}
+            >
+              Reset
+            </Button>
           </div>
         )}
       </div>
@@ -369,11 +396,12 @@ export const EntriesUsersPage: React.FC = () => {
           columns={columns}
           data={entries}
           keyField="identityKey"
-          searchPlaceholder="Search by identityKey, IP hash, receipt..."
+          searchPlaceholder="Search by identityKey, UID, IP, receipt..."
           serverSidePagination
           currentPage={page}
           totalPages={totalPages}
           onPageChange={setPage}
+          searchValue={searchTerm}
           onSearch={(q: string) => {
             setSearchTerm(q);
             setPage(1);
@@ -394,14 +422,24 @@ export const EntriesUsersPage: React.FC = () => {
         footer={
           detailEntry && (
             <div className="flex items-center justify-between gap-3 w-full">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-emerald-400 hover:bg-emerald-500/10"
-                onClick={() => setActionDialog({ isOpen: true, action: 'clear', identityKey: detailEntry.identityKey, isBulk: false })}
-              >
-                Clear to Eligible
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-emerald-400 hover:bg-emerald-500/10"
+                  onClick={() => setActionDialog({ isOpen: true, action: 'clear', identityKey: detailEntry.identityKey, isBulk: false })}
+                >
+                  Clear to Eligible
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-slate-400 hover:text-rose-400 hover:bg-rose-500/10"
+                  onClick={() => setActionDialog({ isOpen: true, action: 'reset', identityKey: detailEntry.identityKey, isBulk: false })}
+                >
+                  Reset Entry
+                </Button>
+              </div>
               <div className="flex items-center gap-2">
                 <Button
                   variant="secondary"
@@ -501,15 +539,25 @@ export const EntriesUsersPage: React.FC = () => {
             ? 'Confirm Ban & Block'
             : actionDialog.action === 'flag'
             ? 'Confirm Flag Entry'
+            : actionDialog.action === 'reset'
+            ? 'Confirm Reset Entry'
             : 'Confirm Clear Entry'
         }
         message={
           actionDialog.isBulk
             ? `You are applying [${actionDialog.action?.toUpperCase()}] to ${selectedKeys.length} selected entries. A clear audit reason is required.`
+            : actionDialog.action === 'reset'
+            ? `You are resetting entry ${actionDialog.identityKey?.slice(0, 10)}... This will purge the entry document and idempotency record so the user can re-register from scratch. This action will be recorded in the audit ledger.`
             : `You are modifying entry ${actionDialog.identityKey?.slice(0, 10)}... to ${actionDialog.action?.toUpperCase()}. This action will be recorded in the cryptographic audit ledger.`
         }
-        confirmText={actionDialog.action === 'ban' ? 'Ban Entry' : 'Apply Action'}
-        variant={actionDialog.action === 'ban' ? 'danger' : 'warning'}
+        confirmText={
+          actionDialog.action === 'ban'
+            ? 'Ban Entry'
+            : actionDialog.action === 'reset'
+            ? 'Reset & Purge Entry'
+            : 'Apply Action'
+        }
+        variant={actionDialog.action === 'ban' || actionDialog.action === 'reset' ? 'danger' : 'warning'}
         requireReason={true}
         reasonPlaceholder="e.g. Coordinated burst detected during window opening"
       />

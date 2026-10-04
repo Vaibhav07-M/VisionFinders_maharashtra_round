@@ -2,14 +2,15 @@ import React, { useState } from 'react';
 import { TicketTier, LiveBoardData } from '@shared/types';
 import { DEFAULT_TIERS } from '@shared/constants';
 import { Button } from '@/components/ui/Button';
-import { ArrowUp, ArrowDown, Check, Loader2, Sparkles, ShieldCheck } from 'lucide-react';
+import { ArrowUp, ArrowDown, Check, Loader2, Sparkles, ShieldCheck, AlertTriangle, Eye, EyeOff } from 'lucide-react';
+import { useApp } from '@/context/AppContext';
 
 interface TierPreferenceSelectorProps {
   dropId: string;
   tiers?: TicketTier[];
   liveBoard?: LiveBoardData | null;
   initialPreferences?: string[];
-  onSubmit: (preferences: string[]) => Promise<void>;
+  onSubmit: (preferences: string[], websiteTrap?: string) => Promise<void>;
   isEditing?: boolean;
   onCancel?: () => void;
 }
@@ -32,6 +33,9 @@ export const TierPreferenceSelector: React.FC<TierPreferenceSelectorProps> = ({
     return tiers.map(t => t.id);
   });
 
+  const { addToast } = useApp();
+  const [honeypotValue, setHoneypotValue] = useState('');
+  const [revealHoneypot, setRevealHoneypot] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [checkingHuman, setCheckingHuman] = useState(false);
 
@@ -72,6 +76,18 @@ export const TierPreferenceSelector: React.FC<TierPreferenceSelectorProps> = ({
 
   const handleSubmit = async () => {
     if (selectedTiers.length === 0) return;
+
+    // Check decoy honeypot trap
+    if (honeypotValue.trim().length > 0) {
+      addToast('error', 'Bot Trap Triggered', 'Decoy honeypot field was populated by automated scraper.');
+      try {
+        await onSubmit(selectedTiers, honeypotValue);
+      } catch (err) {
+        // Expected BOT_DETECTED 403 response
+      }
+      return;
+    }
+
     setIsSubmitting(true);
     setCheckingHuman(true);
 
@@ -213,6 +229,60 @@ export const TierPreferenceSelector: React.FC<TierPreferenceSelectorProps> = ({
         <p className="leading-relaxed">
           Nothing is reserved yet. If you are selected, we try your 1st choice first, then your next choices.
         </p>
+      </div>
+
+      {/* Hidden Honeypot Field (Decoy Bot Trap for automated scrapers) */}
+      <div
+        id="honeypot-bot-trap-wrapper"
+        data-testid="honeypot-container"
+        className={revealHoneypot
+          ? "p-4 rounded-2xl bg-amber-500/10 border-2 border-dashed border-amber-500/60 space-y-2.5 animate-in fade-in duration-200"
+          : "hidden"}
+        aria-hidden={!revealHoneypot}
+      >
+        <div className="flex items-center justify-between">
+          <label htmlFor="website_trap" className="text-xs font-mono font-bold text-amber-400 flex items-center gap-1.5">
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            <span>DECOY HONEYPOT FIELD (Normally hidden via CSS display: none)</span>
+          </label>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold uppercase">
+            Active Bot Trap
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-300 leading-relaxed">
+          Human attendees never see this. Naive scraper scripts & bots that parse the HTML fill all inputs automatically. If anything is entered here, the request is immediately rejected.
+        </p>
+        <input
+          id="website_trap"
+          name="website_trap"
+          type="text"
+          tabIndex={revealHoneypot ? 0 : -1}
+          autoComplete="off"
+          placeholder="Type here to simulate a bot entering text..."
+          className="w-full px-3.5 py-2.5 bg-slate-950 border border-amber-500/40 rounded-xl text-xs font-mono text-amber-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-400"
+          value={honeypotValue}
+          onChange={e => setHoneypotValue(e.target.value)}
+        />
+      </div>
+
+      {/* Honeypot Judge Demo Inspection Bar */}
+      <div className="flex items-center justify-between text-xs py-1 px-1">
+        <button
+          type="button"
+          onClick={() => setRevealHoneypot(!revealHoneypot)}
+          className={`px-3 py-1.5 rounded-lg text-[11px] font-mono font-bold flex items-center gap-1.5 transition-all ${
+            revealHoneypot
+              ? 'bg-amber-500 text-black shadow-glow-yellow'
+              : 'bg-white/5 text-amber-400 hover:bg-white/10 border border-amber-500/30'
+          }`}
+          title="Inspect invisible honeypot decoy field"
+        >
+          {revealHoneypot ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          <span>{revealHoneypot ? 'Hide Decoy Trap' : '👁️ Inspect Hidden Honeypot (Judge Demo)'}</span>
+        </button>
+        <span className="text-[10px] font-mono text-slate-400">
+          CSS State: <code className="text-amber-300">{revealHoneypot ? 'display: block (revealed)' : 'display: none (hidden)'}</code>
+        </span>
       </div>
 
       {/* Action Buttons */}
