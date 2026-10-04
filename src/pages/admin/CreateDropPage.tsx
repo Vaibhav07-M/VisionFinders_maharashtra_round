@@ -196,6 +196,14 @@ export const CreateDropPage: React.FC = () => {
       addToast('error', 'Validation Error', 'Event title is required.');
       return;
     }
+
+    const duplicate = drops.find(
+      d => d.id !== id && d.name.trim().toLowerCase() === name.trim().toLowerCase()
+    );
+    if (duplicate) {
+      addToast('error', 'Duplicate Event Name', `An event with the name "${name.trim()}" already exists. Please choose a unique name.`);
+      return;
+    }
     const startMs = new Date(windowStart).getTime();
     const endMs = new Date(windowEnd).getTime();
     if (endMs <= startMs) {

@@ -151,16 +151,6 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   const phone = req.user?.email || userUid;
   const identityKey = sha256Sync(phone);
 
-  const existingEntry = db.get(`drops/${dropId}/entries`, identityKey);
-  if (existingEntry) {
-    return res.json({
-      isDuplicate: true,
-      code: 'DUPLICATE_RECEIPT',
-      entry: existingEntry.data,
-      message: 'One identity = one entry. Returning existing registered receipt.',
-    });
-  }
-
   // Tier preferences (Section 2 requirement)
   const dropTiers = drop.tiers || [
     { id: 'vip' },
@@ -173,6 +163,32 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
   const inputPrefs = Array.isArray(req.body.preferences) ? req.body.preferences : [];
   const preferences = inputPrefs.filter((p: string) => validTierIds.includes(p));
   const finalPreferences = preferences.length > 0 ? preferences : validTierIds;
+
+  const existingEntry = db.get(`drops/${dropId}/entries`, identityKey);
+  if (existingEntry) {
+    const updated: DropEntry = {
+      ...(existingEntry.data as DropEntry),
+      status: 'entered',
+      preferences: finalPreferences,
+      serverTimestamp: Date.now(),
+    };
+    db.set(`drops/${dropId}/entries`, identityKey, updated);
+
+    // Clean up any stale tickets from prior demo rounds for this drop
+    const allTickets = db.list('tickets');
+    for (const tDoc of allTickets) {
+      const t = tDoc.data as any;
+      if (t.uid === userUid && t.dropId === dropId) {
+        db.delete('tickets', t.id);
+      }
+    }
+
+    return res.json({
+      isDuplicate: false,
+      entry: updated,
+      message: 'Entry registered with selected tier preferences.',
+    });
+  }
 
   // 9. CREATE ENTRY DOCUMENT (Doc ID = identityKey enforces atomic uniqueness)
   const receiptId = `RCP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
@@ -290,3 +306,24 @@ export function updatePreferencesHandler(req: AuthenticatedRequest, res: Respons
 
   return res.json({ success: true, entry: updatedEntry });
 }
+
+// GET /api/entries/me
+export function getMyEntriesHandler(req: AuthenticatedRequest, res: Response) {
+  const uid = req.user?.uid || 'user_alex_77';
+  const email = req.user?.email || 'alex.chen@fairdrop.io';
+  const identityKey = sha256Sync(email);
+
+  const drops = db.list('drops').map(d => d.data as Drop);
+  const myEntries: DropEntry[] = [];
+
+  for (const d of drops) {
+    const all = db.list(`drops/${d.id}/entries`).map(doc => doc.data as DropEntry);
+    const entry = all.find(e => e.uid === uid || e.identityKey === identityKey);
+    if (entry) {
+      myEntries.push(entry);
+    }
+  }
+
+  return res.json({ entries: myEntries, count: myEntries.length });
+}
+

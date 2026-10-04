@@ -211,6 +211,7 @@ export const api = {
         body: JSON.stringify(payload),
       }),
     getMe: (dropId: string) => request<{ entry: DropEntry | null; reservation: Reservation | null }>(`/drops/${dropId}/entries/me`),
+    getMyEntries: () => request<{ entries: DropEntry[]; count: number }>('/entries/me'),
   },
 
   // Draw Execution

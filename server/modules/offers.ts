@@ -24,9 +24,16 @@ export function ensureSeatsForDrop(drop: Drop): Seat[] {
   const existingDocs = db.list(`drops/${drop.id}/seats`);
   const existingSeats = existingDocs.map(d => d.data as Seat);
 
-  // If seats already exist with tierId, return them
-  if (existingSeats.length > 0 && existingSeats[0].tierId) {
+  // If seats already exist with clean tiered labels, return them
+  if (existingSeats.length > 0 && existingSeats[0].tierId && !existingSeats[0].label.includes('Orchestra')) {
     return existingSeats;
+  }
+
+  // Clean up legacy un-tiered seats if none have been sold
+  if (existingSeats.length > 0 && !existingSeats.some(s => s.status === 'sold')) {
+    for (const s of existingSeats) {
+      db.delete(`drops/${drop.id}/seats`, s.id);
+    }
   }
 
   const tiers: TicketTier[] = drop.tiers && drop.tiers.length > 0 ? drop.tiers : DEFAULT_TIERS;
@@ -92,8 +99,45 @@ export function getLiveBoardData(dropId: string): LiveBoardData {
   const tiers: TicketTier[] = drop?.tiers && drop.tiers.length > 0 ? drop.tiers : DEFAULT_TIERS;
 
   let seats = db.list(`drops/${dropId}/seats`).map(d => d.data as Seat);
-  if (seats.length === 0 && drop) {
+  if ((seats.length === 0 || seats[0]?.label?.includes('Orchestra')) && drop) {
     seats = ensureSeatsForDrop(drop);
+  }
+
+  // Ensure every seat has a tierId associated with it
+  let needsBatchUpdate = false;
+  const batchUpdates: any[] = [];
+  seats = seats.map((s, idx) => {
+    if (s.tierId) return s;
+    const numMatch = s.id?.match(/\d+/);
+    const seatNum = numMatch ? parseInt(numMatch[0], 10) : idx + 1;
+    let accum = 0;
+    let assignedTier = tiers[tiers.length - 1];
+    for (const t of tiers) {
+      accum += (t.seatCount || 0);
+      if (seatNum <= accum) {
+        assignedTier = t;
+        break;
+      }
+    }
+    const updatedSeat: Seat = {
+      ...s,
+      tierId: assignedTier.id,
+      price: assignedTier.price,
+    };
+    batchUpdates.push({
+      type: 'set',
+      collection: `drops/${dropId}/seats`,
+      docId: s.id,
+      data: updatedSeat,
+    });
+    needsBatchUpdate = true;
+    return updatedSeat;
+  });
+
+  if (needsBatchUpdate && batchUpdates.length > 0) {
+    for (let b = 0; b < batchUpdates.length; b += 450) {
+      db.batchWrite(batchUpdates.slice(b, b + 450));
+    }
   }
 
   const entries = db.list(`drops/${dropId}/entries`).map(d => d.data as DropEntry);

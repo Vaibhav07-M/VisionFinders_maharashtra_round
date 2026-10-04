@@ -3,11 +3,22 @@ import { LiveBoardData, LiveTierStat } from '@shared/types';
 import { Countdown } from '@/components/ui/Countdown';
 import { Users, Clock, Ticket, Shield, CheckCircle2, AlertCircle } from 'lucide-react';
 
+export interface SelectedSeatInfo {
+  id: string;
+  label: string;
+  tierId: string;
+  tierName?: string;
+  price: number;
+}
+
 interface LiveSeatBoardProps {
   board: LiveBoardData | null;
   selectedTierId?: string | null;
   onSelectTier?: (tierId: string | null) => void;
   compact?: boolean;
+  selectable?: boolean;
+  selectedSeatId?: string | null;
+  onSelectSeat?: (seat: SelectedSeatInfo) => void;
 }
 
 export const LiveSeatBoard: React.FC<LiveSeatBoardProps> = ({
@@ -15,6 +26,9 @@ export const LiveSeatBoard: React.FC<LiveSeatBoardProps> = ({
   selectedTierId: externalTierId,
   onSelectTier: externalSelectTier,
   compact = false,
+  selectable = true,
+  selectedSeatId,
+  onSelectSeat,
 }) => {
   const [internalTierFilter, setInternalTierFilter] = useState<string | null>(null);
 
@@ -141,6 +155,12 @@ export const LiveSeatBoard: React.FC<LiveSeatBoardProps> = ({
 
         {/* Legend */}
         <div className="flex items-center gap-4 text-[10px]">
+          {selectable && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-brand-yellow border border-brand-yellow ring-1 ring-brand-yellow" />
+              <span className="text-brand-yellow font-bold">Selected</span>
+            </span>
+          )}
           <span className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500/30 border border-emerald-500/60" />
             <span className="text-emerald-300">Available</span>
@@ -156,27 +176,74 @@ export const LiveSeatBoard: React.FC<LiveSeatBoardProps> = ({
         </div>
       </div>
 
-      {/* Read-Only Seat Grid */}
+      {/* Interactive Helper Text */}
+      {selectable && onSelectSeat && (
+        <div className="flex items-center gap-2 text-xs font-mono text-slate-300 bg-surface-100/60 p-2.5 rounded-xl border border-white/10">
+          <span className="text-brand-yellow font-bold">👉 Interactive Seat Selector:</span>
+          <span>Click any green seat below to select which seat you want.</span>
+        </div>
+      )}
+
+      {/* Seat Grid */}
       <div className="bg-[#090a10] p-4 rounded-2xl border border-white/10 max-h-80 overflow-y-auto">
         <div className="grid grid-cols-5 sm:grid-cols-10 md:grid-cols-12 lg:grid-cols-20 gap-1.5 text-[9px] font-mono">
           {filteredSeats.map(seat => {
             const isAvailable = seat.status === 'available';
             const isHeld = seat.status === 'held';
             const isSold = seat.status === 'sold';
+            const isSelected = selectedSeatId === seat.id;
+            const tierInfo = board.tiers.find(t => t.tierId === seat.tierId);
+            const displayLabel = seat.label
+              .replace(/^Orchestra\s+[A-Za-z0-9]+\s+[·•\-]\s+Row\s+/i, '')
+              .replace(/^Orchestra\s+[A-Za-z0-9]+\s+[·•\-]\s+/i, '')
+              .replace(/^Row\s+/i, '')
+              .replace('PLAT-', 'P-')
+              .replace('GOLD-', 'G-')
+              .replace('SILV-', 'S-')
+              .replace('BRNZ-', 'B-');
+            const cleanTooltipLabel = seat.label
+              .replace(/^Orchestra\s+[A-Za-z0-9]+\s+[·•\-]\s+Row\s+/i, 'Row ')
+              .replace(/^Orchestra\s+[A-Za-z0-9]+\s+[·•\-]\s+/i, '');
+
+            if (isAvailable && selectable && onSelectSeat) {
+              return (
+                <button
+                  key={seat.id}
+                  type="button"
+                  onClick={() =>
+                    onSelectSeat({
+                      id: seat.id,
+                      label: cleanTooltipLabel,
+                      tierId: seat.tierId,
+                      tierName: tierInfo?.name || seat.tierId,
+                      price: seat.price,
+                    })
+                  }
+                  title={`Click to Select: ${cleanTooltipLabel} (${tierInfo?.name || seat.tierId} - Rs ${seat.price})`}
+                  className={`h-7 rounded flex items-center justify-center font-bold border transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-brand-yellow text-black border-brand-yellow font-black scale-110 shadow-lg shadow-yellow-500/40 ring-2 ring-brand-yellow ring-offset-1 ring-offset-black z-10'
+                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:scale-110 hover:border-brand-yellow hover:bg-emerald-500/30'
+                  }`}
+                >
+                  {displayLabel}
+                </button>
+              );
+            }
 
             return (
               <div
                 key={seat.id}
-                title={`${seat.label} - ${seat.status.toUpperCase()} (Rs ${seat.price})`}
+                title={`${cleanTooltipLabel} - ${seat.status.toUpperCase()} (Rs ${seat.price})`}
                 className={`h-7 rounded flex items-center justify-center font-bold border transition-all ${
-                  isAvailable
-                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:scale-105'
-                    : isHeld
+                  isHeld
                     ? 'bg-amber-500/20 text-amber-200 border-amber-500/50 animate-pulse shadow-sm shadow-amber-500/20'
-                    : 'bg-white/5 text-slate-600 border-white/5'
+                    : isAvailable
+                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                    : 'bg-white/5 text-slate-600 border-white/5 cursor-not-allowed opacity-50'
                 }`}
               >
-                {seat.label.replace('PLAT-', 'P-').replace('GOLD-', 'G-').replace('SILV-', 'S-').replace('BRNZ-', 'B-')}
+                {displayLabel}
               </div>
             );
           })}

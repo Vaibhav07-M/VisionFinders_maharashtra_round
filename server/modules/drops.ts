@@ -65,7 +65,13 @@ export function initSampleDrops() {
 
 // GET /api/drops
 export function listDropsHandler(req: Request, res: Response) {
-  const drops = db.list('drops').map(d => ensureActiveWindow(d.data as Drop));
+  const drops = db.list('drops').map(d => {
+    const data = d.data as Drop;
+    if (!data.createdAt) {
+      data.createdAt = new Date(d.createdAt || Date.now()).toISOString();
+    }
+    return ensureActiveWindow(data);
+  });
   return res.json({ drops });
 }
 
@@ -151,6 +157,19 @@ export function updateDropHandler(req: AuthenticatedRequest, res: Response) {
 export async function createDropHandler(req: AuthenticatedRequest, res: Response) {
   const data = req.body;
   const id = data.id || `drop-${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+  const cleanName = (data.name || 'Exclusive Allocation Event').trim();
+
+  // Validate duplicate drop name (case-insensitive)
+  const existingDrops = db.list('drops').map(d => d.data as Drop);
+  const isDuplicate = existingDrops.some(
+    d => d.id !== id && d.name.trim().toLowerCase() === cleanName.toLowerCase()
+  );
+  if (isDuplicate) {
+    return res.status(409).json({
+      error: 'DUPLICATE_DROP_NAME',
+      message: `An event with the name "${cleanName}" already exists. Please choose a unique name.`,
+    });
+  }
   
   // Section 1 Commit-Reveal: publish hash(seed) before window opens
   const secretSeed = `SEED_${Date.now()}_${Math.random().toString(36).substring(2)}`;
@@ -160,7 +179,7 @@ export async function createDropHandler(req: AuthenticatedRequest, res: Response
   const seatCount = data.seatCount || tiers.reduce((acc: number, t: TicketTier) => acc + t.seatCount, 0) || 500;
   const newDrop: Drop = {
     id,
-    name: data.name || 'Exclusive Allocation Event',
+    name: cleanName,
     artistOrHost: data.artistOrHost || 'Organizer',
     venue: data.venue || 'Concert Hall',
     city: data.city || 'Nashville, TN',
@@ -182,6 +201,7 @@ export async function createDropHandler(req: AuthenticatedRequest, res: Response
     createdBy: req.user?.uid || 'organizer',
     description: data.description || 'Verified commit-reveal random lottery drop.',
     totalEntriesCount: 0,
+    createdAt: data.createdAt || new Date().toISOString(),
     stats: {
       eligible: 0,
       flagged: 0,
@@ -208,4 +228,30 @@ export async function createDropHandler(req: AuthenticatedRequest, res: Response
   });
 
   return res.status(201).json({ drop: newDrop });
+}
+
+// DELETE /api/drops/:id
+export async function deleteDropHandler(req: AuthenticatedRequest, res: Response) {
+  const id = req.params.id as string;
+  const doc = db.get('drops', id);
+  if (!doc) {
+    return res.status(404).json({ error: 'Drop not found' });
+  }
+
+  // Remove from database and Cloud Firestore
+  db.delete('drops', id);
+  db.delete('private_seeds', id);
+
+  // Clean up any tickets belonging to this drop
+  const tickets = db.list('tickets').map(d => d.data as Ticket).filter(t => t.dropId === id);
+  for (const t of tickets) {
+    db.delete('tickets', t.id);
+  }
+
+  appendAuditRecord('DROP_DELETED', req.user?.uid || 'organizer', {
+    dropId: id,
+    dropName: doc.data.name,
+  });
+
+  return res.json({ success: true, message: `Drop ${id} deleted successfully.` });
 }
