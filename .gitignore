@@ -28,5 +28,6 @@ firebase-service-account.json
 *.suo
 *.ntvs*
 *.njsproj
+scratch/
 *.sln
 *.sw?

@@ -23,14 +23,14 @@ export const Badge: React.FC<BadgeProps> = ({
   };
 
   const variantStyles = {
-    yellow: 'bg-brand-yellow/15 text-brand-yellow border border-brand-yellow/30 font-display',
-    emerald: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
-    cyan: 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30',
-    rose: 'bg-rose-500/15 text-rose-400 border border-rose-500/30',
-    amber: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',
-    slate: 'bg-slate-800 text-slate-300 border border-slate-700',
-    outline: 'bg-transparent text-slate-300 border border-white/20',
-    pulse: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse',
+    yellow: 'bg-black/90 backdrop-blur-md text-brand-yellow border border-brand-yellow/60 font-display shadow-md',
+    emerald: 'bg-black/90 backdrop-blur-md text-emerald-400 border border-emerald-500/50 shadow-md',
+    cyan: 'bg-black/90 backdrop-blur-md text-cyan-400 border border-cyan-500/50 shadow-md',
+    rose: 'bg-black/90 backdrop-blur-md text-rose-400 border border-rose-500/50 shadow-md',
+    amber: 'bg-black/90 backdrop-blur-md text-amber-400 border border-amber-500/50 shadow-md',
+    slate: 'bg-black/90 backdrop-blur-md text-slate-200 border border-white/20 shadow-md',
+    outline: 'bg-black/80 backdrop-blur-md text-slate-200 border border-white/20 shadow-md',
+    pulse: 'bg-black/90 backdrop-blur-md text-emerald-300 border border-emerald-500/60 shadow-md animate-pulse',
   };
 
   const dotColors = {

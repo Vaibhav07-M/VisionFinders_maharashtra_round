@@ -67,7 +67,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           </div>
           <div className="p-3 rounded-xl bg-surface-100/50 border border-white/5">
             <span className="text-[10px] uppercase text-slate-400 block">Venue</span>
-            <span className="text-white font-semibold truncate block mt-0.5">{venue}</span>
+            <span className="text-white font-semibold block mt-0.5 leading-snug">{venue}</span>
           </div>
         </div>
       </div>
@@ -90,10 +90,25 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         </span>
       </div>
 
-      {/* Footer Info */}
-      <div className="pt-2 border-t border-white/10 flex items-center justify-between text-[11px] font-mono text-slate-400">
-        <span>Order #{ticket.orderId.substring(0, 10)}</span>
-        <span>Ticket ID: {ticket.id}</span>
+      {/* Confirmation & Footer Info */}
+      <div className="space-y-3 pt-2 border-t border-white/10 text-[11px] font-mono">
+        <div className="flex items-center justify-between text-slate-400">
+          <span>Order #{ticket.orderId.substring(0, 10)}</span>
+          <span>Ticket ID: {ticket.id}</span>
+        </div>
+        <div className="flex items-center justify-between pt-1">
+          <span className="text-emerald-400 font-bold flex items-center gap-1.5 text-xs">
+            <CheckCircle2 className="w-3.5 h-3.5" /> Permanently saved to your account
+          </span>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="text-xs font-mono font-bold text-slate-300 hover:text-white flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+          >
+            <Download className="w-3.5 h-3.5 text-brand-yellow" />
+            Print / Save
+          </button>
+        </div>
       </div>
 
     </div>

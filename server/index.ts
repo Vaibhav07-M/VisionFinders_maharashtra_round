@@ -19,6 +19,7 @@ import {
   getDropHandler,
   createDropHandler,
   updateDropHandler,
+  deleteDropHandler,
   getDropSeatsHandler,
   getDropEntriesHandler,
   updateEntryStatusHandler,
@@ -26,6 +27,7 @@ import {
 import {
   joinDropHandler,
   getUserEntryHandler,
+  getMyEntriesHandler,
   updatePreferencesHandler,
   registerEntryListener,
 } from './modules/entry';
@@ -215,6 +217,7 @@ app.get('/api/drops/:id/entries', getDropEntriesHandler);
 app.patch('/api/drops/:id/entries/:identityKey', authMiddleware, requireRole(['organizer', 'security', 'evaluator']), updateEntryStatusHandler);
 app.post('/api/drops', authMiddleware, requireRole(['organizer', 'security']), createDropHandler);
 app.patch('/api/drops/:id', authMiddleware, requireRole(['organizer', 'security']), updateDropHandler);
+app.delete('/api/drops/:id', authMiddleware, requireRole(['organizer', 'security']), deleteDropHandler);
 
 // Live Seat Board, Preferences & Attendee State (Sections 2, 6, 10)
 app.get('/api/drops/:id/board', getBoardHandler);
@@ -224,6 +227,7 @@ app.post('/api/drops/:id/waitlist/leave', authMiddleware, leaveWaitlistHandler);
 app.post('/api/admin/drops/:id/next-round', authMiddleware, requireRole(['organizer', 'security', 'evaluator']), openNextRoundHandler);
 
 // Drop Entry / Join Pipeline
+app.get('/api/entries/me', authMiddleware, getMyEntriesHandler);
 app.post('/api/drops/:id/join', defenceEventsMiddleware, authMiddleware, joinDropHandler);
 app.get('/api/drops/:id/entries/me', authMiddleware, getUserEntryHandler);
 

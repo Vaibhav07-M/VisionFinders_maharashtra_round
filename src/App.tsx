@@ -36,12 +36,23 @@ import { SimulationLivePage } from '@/pages/lab/SimulationLivePage';
 import { ExperimentMatrixPage } from '@/pages/lab/ExperimentMatrixPage';
 import { FairnessReportPage } from '@/pages/lab/FairnessReportPage';
 
+const ScrollToTop: React.FC = () => {
+  const { pathname } = useLocation();
+
+  React.useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [pathname]);
+
+  return null;
+};
+
 const AppContent: React.FC = () => {
   const location = useLocation();
   const isAdmin = location.pathname.startsWith('/admin');
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-slate-100 selection:bg-brand-yellow selection:text-black">
+      <ScrollToTop />
       {!isAdmin && <Navbar />}
       
       <main className="flex-1 w-full">

@@ -77,7 +77,7 @@ interface AppContextType {
   // Seats & Reservations
   seats: Seat[];
   activeReservation: Reservation | null;
-  checkoutSeat: (seatId: string, paymentMethod: string) => Promise<Ticket>;
+  checkoutSeat: (seatId: string, paymentMethod: string, explicitDropId?: string) => Promise<Ticket>;
   releaseSeat: (reservationId: string) => void;
 
   // Tickets
@@ -234,17 +234,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      // 4. Fetch appeals, audit log, tickets, and simulation reports
-      const [appealsRes, auditRes, ticketsRes, simRes] = await Promise.all([
+      // 4. Fetch appeals, audit log, tickets, user entries, and simulation reports
+      const [appealsRes, auditRes, ticketsRes, myEntriesRes, simRes] = await Promise.all([
         api.appeals.list().catch(() => ({ appeals: [] })),
         api.audit.list().catch(() => ({ records: [] })),
         api.checkout.getMyTickets().catch(() => ({ tickets: [] })),
+        api.entry.getMyEntries().catch(() => ({ entries: [] })),
         api.simulation.getLatest().catch(() => ({ report: null })),
       ]);
 
       if (appealsRes.appeals) setAppeals(appealsRes.appeals);
       if (auditRes.records) setAuditLog(auditRes.records);
       if (ticketsRes.tickets) setTickets(ticketsRes.tickets);
+      if (myEntriesRes.entries && myEntriesRes.entries.length > 0) {
+        setEntries(prev => {
+          const map = new Map<string, DropEntry>();
+          prev.forEach(e => map.set(`${e.dropId}_${e.uid}`, e));
+          myEntriesRes.entries.forEach((e: DropEntry) => map.set(`${e.dropId}_${e.uid}`, e));
+          return Array.from(map.values());
+        });
+      }
       if (simRes.report) {
         setFairnessComparison(simRes.report);
         setLatestTrialResult(simRes.report.scenarios.fairDrop);
@@ -565,7 +574,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const submitJoin = async (dropId: string, preferences: string[], websiteTrap?: string): Promise<{ entry: DropEntry; isDuplicate: boolean }> => {
     try {
-      const idempotencyKey = `idemp_${user.uid}_${dropId}`;
+      const idempotencyKey = `idemp_${user.uid}_${dropId}_${Date.now()}`;
       const dropDoc = drops.find(d => d.id === dropId);
       const difficulty = dropDoc?.defenceConfig?.powDifficulty ?? 2;
       const challenge = `${dropId}:${user.uid}:${idempotencyKey}`;
@@ -576,27 +585,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         nonce = powResult.nonce;
       }
 
-      const res = await api.entry.join(dropId, {
+      let res = await api.entry.join(dropId, {
         idempotencyKey,
         preferences,
         nonce,
         website_trap: websiteTrap,
       });
+
+      // If user was already entered in backend, also update preferences to persist their new tier selection
       if (res.isDuplicate) {
-        addToast('info', 'Already Entered', 'Using your existing verified entry.');
-      } else {
-        addToast('success', 'Entered Draw', 'Preferences recorded. Draw runs when window closes.');
+        try {
+          const updatedRes = await api.drops.updatePreferences(dropId, preferences);
+          if (updatedRes && updatedRes.entry) {
+            res = { entry: updatedRes.entry, isDuplicate: false };
+          }
+        } catch {
+          // ignore fallback
+        }
       }
-      setEntries(prev => [res.entry, ...prev.filter(e => e.identityKey !== res.entry.identityKey)]);
-      setUserDropState(prev => prev ? { ...prev, entry: res.entry } : {
+      addToast('success', 'Entered Draw', 'Preferences recorded. Draw runs when window closes.');
+      const finalEntry: DropEntry = {
+        ...res.entry,
+        status: 'entered',
+        preferences,
+      };
+      setEntries(prev => [finalEntry, ...prev.filter(e => e.identityKey !== finalEntry.identityKey)]);
+      setUserDropState(prev => ({
         dropId,
-        entry: res.entry,
+        entry: finalEntry,
         offer: null,
         waitlistPosition: null,
-        totalWaitlisted: 0,
+        totalWaitlisted: prev?.totalWaitlisted || 0,
         ticket: null,
-      });
-      return { entry: res.entry, isDuplicate: res.isDuplicate };
+      }));
+      return { entry: finalEntry, isDuplicate: false };
     } catch (err: any) {
       addToast('error', 'Entry Failed', err.message);
       throw err;
@@ -691,10 +713,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Checkout Seat & Generate Signed Ticket
-  const checkoutSeat = async (seatId: string, paymentMethod: string): Promise<Ticket> => {
+  const checkoutSeat = async (seatId: string, paymentMethod: string, explicitDropId?: string): Promise<Ticket> => {
     try {
       const targetSeat = seats.find(s => s.id === seatId);
-      const dropId = targetSeat?.dropId || drops[0]?.id || 'drop-jack-white-vault';
+      const dropId = explicitDropId || targetSeat?.dropId || drops[0]?.id || 'drop-jack-white-vault';
 
       const res = await api.checkout.purchase({
         dropId,

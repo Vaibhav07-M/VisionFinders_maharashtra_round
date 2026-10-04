@@ -61,7 +61,7 @@ export const CheckoutPage: React.FC = () => {
     e.preventDefault();
     setIsProcessing(true);
     try {
-      const ticket = await checkoutSeat(assignedSeat.id, paymentMethod);
+      const ticket = await checkoutSeat(assignedSeat.id, paymentMethod, drop.id);
       setIsProcessing(false);
       navigate('/me');
     } catch (err: any) {

@@ -127,6 +127,7 @@ export interface Drop {
     held: number;
     sold: number;
   };
+  createdAt?: string;
 }
 
 export interface UserProfile {

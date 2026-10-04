@@ -10,6 +10,7 @@ import { TierPreferenceSelector } from '@/components/attendee/TierPreferenceSele
 import { OfferCard } from '@/components/attendee/OfferCard';
 import { WaitlistCard } from '@/components/attendee/WaitlistCard';
 import { TicketCard } from '@/components/attendee/TicketCard';
+import { TicketConfirmedModal } from '@/components/attendee/TicketConfirmedModal';
 import {
   MapPin,
   Users,
@@ -26,6 +27,8 @@ export const DropDetailPage: React.FC = () => {
     drops,
     getDrop,
     user,
+    tickets,
+    entries,
     liveBoard,
     userDropState,
     activeOffer,
@@ -47,6 +50,7 @@ export const DropDetailPage: React.FC = () => {
   const [isEditingPreferences, setIsEditingPreferences] = useState(false);
   const [reminderSet, setReminderSet] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [showConfirmedModal, setShowConfirmedModal] = useState(true);
 
   // Fetch initial board and user state from server
   useEffect(() => {
@@ -75,39 +79,50 @@ export const DropDetailPage: React.FC = () => {
   const tiers: TicketTier[] = drop.tiers && drop.tiers.length > 0 ? drop.tiers : DEFAULT_TIERS;
 
   // Determine current State in the 8-state Attendee State Machine
-  // 1. PAID
-  const isPaid =
-    Boolean(userDropState?.ticket) ||
-    userDropState?.offer?.status === 'paid' ||
-    userDropState?.entry?.status === 'paid';
+  // Strictly scope userDropState to the active dropId to avoid cross-event state leakage
+  const isDropMatch = userDropState?.dropId === dropId;
+  const dropState = isDropMatch ? userDropState : null;
 
-  // 2. OFFERED (active 5-minute exclusive hold)
+  // 1. PAID: user holds a confirmed ticket for THIS drop
+  const existingTicket =
+    (dropState?.ticket?.dropId === dropId ? dropState.ticket : null) ||
+    tickets.find(t => t.dropId === dropId) ||
+    null;
+  const isPaid =
+    Boolean(existingTicket) ||
+    (isDropMatch && (userDropState?.offer?.status === 'paid' || userDropState?.entry?.status === 'paid'));
+
+  // 2. OFFERED (active 5-minute exclusive hold for THIS drop)
   const isOffered =
-    Boolean(activeOffer && activeOffer.status === 'offered') ||
-    Boolean(userDropState?.offer && userDropState.offer.status === 'offered');
-  const currentOffer = activeOffer || userDropState?.offer;
+    Boolean(activeOffer && activeOffer.dropId === dropId && activeOffer.status === 'offered') ||
+    Boolean(dropState?.offer && dropState.offer.status === 'offered');
+  const currentOffer = (activeOffer?.dropId === dropId ? activeOffer : null) || dropState?.offer;
 
   // 3. EXPIRED or RELEASED
   const isExpiredOrReleased =
-    userDropState?.entry?.status === 'released' ||
-    userDropState?.entry?.status === 'expired' ||
-    userDropState?.offer?.status === 'expired' ||
-    userDropState?.offer?.status === 'released';
+    dropState?.entry?.status === 'released' ||
+    dropState?.entry?.status === 'expired' ||
+    dropState?.offer?.status === 'expired' ||
+    dropState?.offer?.status === 'released';
 
   // 4. WAITLISTED
   const isWaitlisted =
-    userDropState?.entry?.status === 'waitlisted' ||
-    (userDropState?.waitlistPosition !== null && userDropState?.waitlistPosition !== undefined);
+    dropState?.entry?.status === 'waitlisted' ||
+    (dropState?.waitlistPosition !== null && dropState?.waitlistPosition !== undefined);
 
   // 5. BLOCKED
   const isBlocked =
-    Boolean(userDropState?.entry && userDropState.entry.status === 'blocked');
+    Boolean(dropState?.entry && dropState.entry.status === 'blocked');
 
-  // 6. ENTERED (Active in draw pool: 'entered', 'eligible', or 'flagged')
+  // 6. ENTERED: registered tier preferences in draw pool for THIS drop
+  const currentEntry =
+    dropState?.entry ||
+    entries.find(e => e.dropId === dropId && (e.uid === user.uid || (user.email && e.identityKey?.length > 0))) ||
+    null;
   const isEntered =
     Boolean(
-      userDropState?.entry &&
-      ['entered', 'eligible', 'flagged'].includes(userDropState.entry.status)
+      (currentEntry && ['entered', 'eligible', 'flagged', 'selected'].includes(currentEntry.status)) ||
+      (dropState?.entry && ['entered', 'eligible', 'flagged', 'selected'].includes(dropState.entry.status))
     );
 
   // 7. WINDOW OPEN, not entered
@@ -133,7 +148,10 @@ export const DropDetailPage: React.FC = () => {
 
   const handlePay = async (): Promise<Ticket> => {
     if (!currentOffer) throw new Error('No active offer to pay');
-    return await payOffer(currentOffer.id);
+    const ticket = await payOffer(currentOffer.id);
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    setShowConfirmedModal(true);
+    return ticket;
   };
 
   const handleRelease = async () => {
@@ -197,11 +215,55 @@ export const DropDetailPage: React.FC = () => {
 
       {/* ================= STATE MACHINE RENDERER ================= */}
 
-      {/* STATE 1: PAID -> Show Ticket with QR */}
-      {isPaid && userDropState?.ticket && (
-        <div className="space-y-6">
+      {/* STATE 1: PAID -> Show Ticket & Confirmation Details */}
+      {isPaid && existingTicket && (
+        <div className="space-y-6 max-w-xl mx-auto">
+          {/* Confirmed Reassurance Banner */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-emerald-500/10 to-surface-100 border-2 border-emerald-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-emerald-500 text-black flex items-center justify-center font-bold shrink-0 shadow-md">
+                <CheckCircle2 className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div>
+                <h4 className="font-bold text-white text-base leading-tight">
+                  Seat Confirmed & Guaranteed
+                </h4>
+                <p className="text-xs text-slate-300 font-mono mt-0.5">
+                  Seat <span className="text-brand-yellow font-bold">{existingTicket.seatLabel}</span> is officially registered to your account.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowConfirmedModal(true)}
+                className="text-xs font-mono font-bold border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+              >
+                🎉 Receipt
+              </Button>
+              <Link to="/my-tickets">
+                <Button size="sm" variant="primary" className="text-xs font-mono font-bold bg-brand-yellow text-black hover:bg-brand-yellow/90">
+                  My Tickets →
+                </Button>
+              </Link>
+            </div>
+          </div>
+
           <TicketCard
-            ticket={userDropState.ticket}
+            ticket={existingTicket}
+            venue={`${drop.venue}, ${drop.city}`}
+            artistOrHost={drop.artistOrHost}
+            eventName={drop.name}
+          />
+
+
+
+          {/* Celebration Popup / Confirmation Modal */}
+          <TicketConfirmedModal
+            isOpen={showConfirmedModal}
+            onClose={() => setShowConfirmedModal(false)}
+            ticket={existingTicket}
             venue={`${drop.venue}, ${drop.city}`}
             artistOrHost={drop.artistOrHost}
             eventName={drop.name}
@@ -308,13 +370,13 @@ export const DropDetailPage: React.FC = () => {
               </div>
 
               {/* Preferences Summary */}
-              {userDropState?.entry?.preferences && userDropState.entry.preferences.length > 0 && (
+              {currentEntry?.preferences && currentEntry.preferences.length > 0 && (
                 <div className="p-4 rounded-xl bg-surface-100/60 border border-white/10 max-w-md mx-auto text-left space-y-2">
                   <span className="text-[10px] font-mono uppercase text-slate-400 block">
                     Your Tier Preferences (Priority Order):
                   </span>
                   <div className="flex flex-wrap gap-2">
-                    {userDropState.entry.preferences.map((tierId, idx) => {
+                    {currentEntry.preferences.map((tierId, idx) => {
                       const t = tiers.find(item => item.id === tierId);
                       return (
                         <span
@@ -421,8 +483,8 @@ export const DropDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Single Step Tier Preference Selector */}
-          <div className="p-6 sm:p-8 rounded-3xl bg-[#0d0e17] border border-white/15 shadow-2xl">
+          {/* Tier Preference Selector */}
+          <div className="p-6 sm:p-8 rounded-3xl bg-[#0d0e17] border border-white/10 shadow-xl space-y-4">
             <TierPreferenceSelector
               dropId={drop.id}
               tiers={tiers}
@@ -431,13 +493,6 @@ export const DropDetailPage: React.FC = () => {
             />
           </div>
 
-          {/* Seat Board Preview */}
-          <div className="pt-6">
-            <h3 className="text-sm font-mono uppercase text-slate-400 tracking-wider mb-4">
-              Real-Time Seat Board
-            </h3>
-            <LiveSeatBoard board={liveBoard} />
-          </div>
         </div>
       )}
 
