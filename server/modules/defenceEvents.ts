@@ -240,7 +240,7 @@ export function defenceEventsMiddleware(req: Request, res: Response, next: NextF
   const startMs = Date.now();
   const requestId = (req.headers['x-request-id'] as string) || `req_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
   const dropIdMatch = urlPath.match(/\/drops\/([^/?]+)\/join/);
-  const dropId = req.params?.id || (dropIdMatch ? dropIdMatch[1] : 'drop-jack-white-vault');
+  const dropId = (req.params?.id as string) || (dropIdMatch ? dropIdMatch[1] : 'drop-jack-white-vault');
   const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
   const ipHash = sha256Sync(ip).slice(0, 16);
 
@@ -255,14 +255,14 @@ export function defenceEventsMiddleware(req: Request, res: Response, next: NextF
 
     if (statusCode === 201) {
       outcome = 'ACCEPTED';
-      reasonCode = 'ACCEPTED';
+      reasonCode = undefined;
     } else if (statusCode === 200) {
       if (body?.isDuplicate) {
         outcome = 'DUPLICATE_RECEIPT';
-        reasonCode = 'DUPLICATE_RECEIPT';
+        reasonCode = undefined;
       } else {
         outcome = 'ACCEPTED';
-        reasonCode = 'ACCEPTED';
+        reasonCode = undefined;
       }
     } else if (statusCode === 429) {
       outcome = 'RATE_LIMITED';

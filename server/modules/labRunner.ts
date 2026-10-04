@@ -573,6 +573,7 @@ async function executeRunnerLoop(
           ts: Date.now(),
           requestId: reqItem.requestId,
           dropId: targetDropId,
+          ipHash: sha256Sync(reqItem.options?.ip || '127.0.0.1').slice(0, 16),
           outcome,
           reasonCode,
           statusCode: res.status,

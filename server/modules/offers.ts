@@ -147,7 +147,7 @@ export function getLiveBoardData(dropId: string): LiveBoardData {
 
 // GET /api/drops/:id/board
 export function getBoardHandler(req: Request, res: Response) {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const board = getLiveBoardData(id);
   return res.json({ board });
 }
@@ -187,7 +187,7 @@ export function getUserDropState(dropId: string, uid: string, email?: string): U
 
 // GET /api/drops/:id/me
 export function getUserDropStateHandler(req: AuthenticatedRequest, res: Response) {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const uid = req.user?.uid || 'user_guest';
   const state = getUserDropState(id, uid, req.user?.email);
   return res.json(state);
@@ -372,7 +372,7 @@ export function startOfferExpiryScheduler() {
 
 // POST /api/offers/:id/pay
 export async function payOfferHandler(req: AuthenticatedRequest, res: Response) {
-  const { id: offerId } = req.params;
+  const offerId = req.params.id as string;
   const uid = req.user?.uid || 'user_guest';
 
   // Search for offer across all drops
@@ -496,7 +496,7 @@ export async function payOfferHandler(req: AuthenticatedRequest, res: Response) 
 
 // POST /api/offers/:id/release
 export async function releaseOfferHandler(req: AuthenticatedRequest, res: Response) {
-  const { id: offerId } = req.params;
+  const offerId = req.params.id as string;
   const uid = req.user?.uid || 'user_guest';
 
   // Search for offer
@@ -555,7 +555,7 @@ export async function releaseOfferHandler(req: AuthenticatedRequest, res: Respon
 
 // POST /api/drops/:id/waitlist/leave
 export function leaveWaitlistHandler(req: AuthenticatedRequest, res: Response) {
-  const { id: dropId } = req.params;
+  const dropId = req.params.id as string;
   const uid = req.user?.uid || 'user_guest';
 
   const entries = db.list(`drops/${dropId}/entries`).map(d => d.data as DropEntry);
@@ -599,7 +599,7 @@ export function leaveWaitlistHandler(req: AuthenticatedRequest, res: Response) {
 
 // POST /api/admin/drops/:id/next-round
 export function openNextRoundHandler(req: AuthenticatedRequest, res: Response) {
-  const { id: dropId } = req.params;
+  const dropId = req.params.id as string;
   const dropDoc = db.get('drops', dropId);
   if (!dropDoc) {
     return res.status(404).json({ error: 'DROP_NOT_FOUND', message: 'Drop event not found.' });

@@ -123,33 +123,36 @@ export const CreateDropPage: React.FC = () => {
 
   // If editing, load existing drop values
   useEffect(() => {
-    if (existingDrop) {
-      setName(existingDrop.name);
-      setArtistOrHost(existingDrop.artistOrHost);
-      setVenue(existingDrop.venue);
-      setCity(existingDrop.city);
-      setHeroImage(existingDrop.heroImage || heroImage);
-      setCurrency((existingDrop.currency as any) || 'Rs');
-      setPrice(existingDrop.price || 2500);
-      setMode(existingDrop.mode);
-      setHoldDurationSec(existingDrop.holdDurationSec || 300);
-      if (existingDrop.tiers && existingDrop.tiers.length > 0) {
-        setTiers(existingDrop.tiers.map(t => ({ ...t })));
+    const applyExisting = () => {
+      if (existingDrop) {
+        setName(existingDrop.name);
+        setArtistOrHost(existingDrop.artistOrHost);
+        setVenue(existingDrop.venue);
+        setCity(existingDrop.city);
+        setHeroImage(existingDrop.heroImage || heroImage);
+        setCurrency((existingDrop.currency as any) || 'Rs');
+        setPrice(existingDrop.price || 2500);
+        setMode(existingDrop.mode);
+        setHoldDurationSec(existingDrop.holdDurationSec || 300);
+        if (existingDrop.tiers && existingDrop.tiers.length > 0) {
+          setTiers(existingDrop.tiers.map(t => ({ ...t })));
+        }
+        if (existingDrop.windowStart) {
+          setWindowStart(new Date(existingDrop.windowStart).toISOString().substring(0, 16));
+        }
+        if (existingDrop.windowEnd) {
+          setWindowEnd(new Date(existingDrop.windowEnd).toISOString().substring(0, 16));
+        }
+        if (existingDrop.defenceConfig) {
+          setPowDifficulty(existingDrop.defenceConfig.powDifficulty ?? 3);
+          setTurnstileEnabled(existingDrop.defenceConfig.turnstileEnabled ?? true);
+          setPowEnabled(existingDrop.defenceConfig.powEnabled ?? true);
+          setHoneypotEnabled(existingDrop.defenceConfig.honeypotEnabled ?? true);
+          setRateLimitPerIp(existingDrop.defenceConfig.rateLimitPerIp ?? 20);
+        }
       }
-      if (existingDrop.windowStart) {
-        setWindowStart(new Date(existingDrop.windowStart).toISOString().substring(0, 16));
-      }
-      if (existingDrop.windowEnd) {
-        setWindowEnd(new Date(existingDrop.windowEnd).toISOString().substring(0, 16));
-      }
-      if (existingDrop.defenceConfig) {
-        setPowDifficulty(existingDrop.defenceConfig.powDifficulty ?? 3);
-        setTurnstileEnabled(existingDrop.defenceConfig.turnstileEnabled ?? true);
-        setPowEnabled(existingDrop.defenceConfig.powEnabled ?? true);
-        setHoneypotEnabled(existingDrop.defenceConfig.honeypotEnabled ?? true);
-        setRateLimitPerIp(existingDrop.defenceConfig.rateLimitPerIp ?? 20);
-      }
-    }
+    };
+    applyExisting();
   }, [existingDrop]);
 
   // Handle tier field updates

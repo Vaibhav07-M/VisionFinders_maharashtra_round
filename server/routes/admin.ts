@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { db } from '../db/firestore';
+import { db, sha256Sync } from '../db/firestore';
 import { authMiddleware, requireRole } from '../modules/auth';
 import { appendAuditRecord, verifyAuditHashChain } from '../modules/audit';
 import { runSystemInvariantCheck } from '../modules/invariants';
@@ -185,7 +185,7 @@ router.get('/drops', (req: Request, res: Response) => {
     const entries = db.list(`drops/${drop.id}/entries`).map(e => e.data as DropEntry);
     return {
       ...drop,
-      seatsCount: seats.length || drop.totalSeats || 500,
+      seatsCount: seats.length || drop.seatCount || 500,
       seatsAvailable: seats.filter(s => s.status === 'available').length,
       seatsHeld: seats.filter(s => s.status === 'held').length,
       seatsSold: seats.filter(s => s.status === 'sold').length,
@@ -224,11 +224,31 @@ router.post('/drops', disallowReadOnly, (req: Request, res: Response) => {
   }
 
   const id = `drop-${Date.now().toString(36)}`;
+  const secretSeed = `SEED_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+  const seedCommitHash = sha256Sync(secretSeed);
+  db.set('private_seeds', id, { secretSeed, seedCommitHash });
+
   const newDrop: Drop = {
     id,
-    ...data,
+    name: data.name,
+    artistOrHost: data.artistOrHost,
+    venue: data.venue,
+    city: data.city,
+    heroImage: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=1600&q=80',
+    seatCount: data.totalSeats,
+    price: data.pricePerSeat,
+    currency: 'USD',
+    perPersonLimit: data.perPersonLimit,
+    windowStart: data.windowStart,
+    windowEnd: data.windowEnd,
+    drawTime: data.drawTime,
+    holdDurationSec: data.holdDurationSeconds,
+    mode: data.mode,
     status: 'draft',
+    seedCommitHash,
+    revealedSeed: null,
     createdBy: getActor(req),
+    description: data.description,
     defenceConfig: {
       turnstileEnabled: true,
       powEnabled: true,
@@ -242,6 +262,15 @@ router.post('/drops', disallowReadOnly, (req: Request, res: Response) => {
       minRiskBlockScore: 80,
       minRiskChallengeScore: 50,
     },
+    totalEntriesCount: 0,
+    stats: {
+      eligible: 0,
+      flagged: 0,
+      blocked: 0,
+      allocated: 0,
+      held: 0,
+      sold: 0,
+    },
   };
 
   db.set('drops', id, newDrop);
@@ -252,9 +281,14 @@ router.post('/drops', disallowReadOnly, (req: Request, res: Response) => {
     const seatId = `s-${i.toString().padStart(3, '0')}`;
     const sec = sections[i % sections.length];
     const row = String.fromCharCode(65 + Math.floor((i - 1) / 50) % 26);
+    const tierId = i <= Math.floor(data.totalSeats * 0.1) ? 'vip' :
+      i <= Math.floor(data.totalSeats * 0.25) ? 'platinum' :
+      i <= Math.floor(data.totalSeats * 0.5) ? 'gold' :
+      i <= Math.floor(data.totalSeats * 0.75) ? 'silver' : 'bronze';
     const seat: Seat = {
       id: seatId,
       dropId: id,
+      tierId,
       section: sec,
       row,
       number: i,
@@ -272,7 +306,7 @@ router.post('/drops', disallowReadOnly, (req: Request, res: Response) => {
 
 // PUT /api/admin/drops/:id
 router.put('/drops/:id', disallowReadOnly, (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const existingDoc = db.get('drops', id);
   if (!existingDoc) {
     return res.status(404).json({ error: 'Drop not found' });
@@ -288,7 +322,7 @@ router.put('/drops/:id', disallowReadOnly, (req: Request, res: Response) => {
 
 // POST /api/admin/drops/:id/pause
 router.post('/drops/:id/pause', disallowReadOnly, (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const doc = db.get('drops', id);
   if (!doc) return res.status(404).json({ error: 'Drop not found' });
 
@@ -302,7 +336,7 @@ router.post('/drops/:id/pause', disallowReadOnly, (req: Request, res: Response) 
 
 // POST /api/admin/drops/:id/resume
 router.post('/drops/:id/resume', disallowReadOnly, (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const doc = db.get('drops', id);
   if (!doc) return res.status(404).json({ error: 'Drop not found' });
 
@@ -322,7 +356,7 @@ router.post('/drops/:id/resume', disallowReadOnly, (req: Request, res: Response)
 
 // POST /api/admin/drops/:id/extend
 router.post('/drops/:id/extend', disallowReadOnly, (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const minutes = Number(req.body.minutes);
   if (!minutes || minutes <= 0 || isNaN(minutes)) {
     return res.status(400).json({ error: 'Minutes to extend must be a positive number' });
@@ -351,7 +385,7 @@ router.post('/drops/:id/extend', disallowReadOnly, (req: Request, res: Response)
 
 // POST /api/admin/drops/:id/emergency-stop
 router.post('/drops/:id/emergency-stop', disallowReadOnly, (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const { reason } = req.body;
   if (!reason || typeof reason !== 'string' || reason.trim().length < 4) {
     return res.status(400).json({ error: 'A valid reason (min 4 chars) is required for emergency stop.' });
@@ -374,7 +408,7 @@ router.post('/drops/:id/emergency-stop', disallowReadOnly, (req: Request, res: R
 
 // GET /api/admin/drops/:id/inventory
 router.get('/drops/:id/inventory', (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const seats = db.list(`drops/${id}/seats`).map(s => s.data as Seat);
   
   const stats = {
@@ -390,7 +424,8 @@ router.get('/drops/:id/inventory', (req: Request, res: Response) => {
 
 // POST /api/admin/drops/:id/seats/:seatId/hold
 router.post('/drops/:id/seats/:seatId/hold', disallowReadOnly, (req: Request, res: Response) => {
-  const { id, seatId } = req.params;
+  const id = req.params.id as string;
+  const seatId = req.params.seatId as string;
   const { reason, durationMinutes = 15 } = req.body;
 
   if (!reason || typeof reason !== 'string' || reason.trim().length < 3) {
@@ -416,7 +451,8 @@ router.post('/drops/:id/seats/:seatId/hold', disallowReadOnly, (req: Request, re
 
 // POST /api/admin/drops/:id/seats/:seatId/unhold
 router.post('/drops/:id/seats/:seatId/unhold', disallowReadOnly, (req: Request, res: Response) => {
-  const { id, seatId } = req.params;
+  const id = req.params.id as string;
+  const seatId = req.params.seatId as string;
   const { reason } = req.body;
 
   if (!reason || typeof reason !== 'string' || reason.trim().length < 3) {
@@ -446,7 +482,7 @@ router.post('/drops/:id/seats/:seatId/unhold', disallowReadOnly, (req: Request, 
 
 // GET /api/admin/drops/:id/entries - Server-side paginated & filtered
 router.get('/drops/:id/entries', (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const page = Math.max(1, parseInt(req.query.page as string) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string) || 20));
   const search = (req.query.q as string || '').toLowerCase().trim();
@@ -512,7 +548,8 @@ router.get('/drops/:id/entries', (req: Request, res: Response) => {
 
 // POST /api/admin/drops/:id/entries/:identityKey/action (flag, ban, clear with reason)
 router.post('/drops/:id/entries/:identityKey/action', disallowReadOnly, (req: Request, res: Response) => {
-  const { id, identityKey } = req.params;
+  const id = req.params.id as string;
+  const identityKey = req.params.identityKey as string;
   const { action, reason } = req.body;
 
   if (!['flag', 'ban', 'clear'].includes(action)) {
@@ -557,7 +594,7 @@ router.post('/drops/:id/entries/:identityKey/action', disallowReadOnly, (req: Re
 
 // POST /api/admin/drops/:id/entries/bulk (bulk action)
 router.post('/drops/:id/entries/bulk', disallowReadOnly, (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const { identityKeys, action, reason } = req.body;
 
   if (!Array.isArray(identityKeys) || identityKeys.length === 0) {
@@ -603,7 +640,7 @@ router.post('/drops/:id/entries/bulk', disallowReadOnly, (req: Request, res: Res
 
 // POST /api/admin/drops/:id/entries/clear-all - Discard all entries for this drop (testing convenience)
 router.post('/drops/:id/entries/clear-all', disallowReadOnly, (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const entries = db.list(`drops/${id}/entries`);
   for (const entry of entries) {
     db.delete(`drops/${id}/entries`, entry.id);
@@ -626,6 +663,15 @@ router.post('/drops/:id/entries/clear-all', disallowReadOnly, (req: Request, res
 
 // GET /api/admin/security
 router.get('/security', (req: Request, res: Response) => {
+  const dropId = req.query.dropId as string;
+  let dropDefence = null;
+  if (dropId) {
+    const dropDoc = db.get('drops', dropId);
+    if (dropDoc) {
+      dropDefence = (dropDoc.data as Drop)?.defenceConfig || null;
+    }
+  }
+
   const config = getSecurityConfig();
   const blocklist = Array.from(activeBlocklist);
   const ruleHits = {
@@ -642,6 +688,7 @@ router.get('/security', (req: Request, res: Response) => {
 
   return res.json({
     config,
+    dropDefence,
     blocklist,
     ruleHits,
     lastChangedBy: lastAudit?.actorUid || 'system',
@@ -663,6 +710,7 @@ const securityConfigSchema = z.object({
   deviceMaxRequests: z.number().int().min(1).max(10000),
   minRiskBlockScore: z.number().min(0).max(100),
   minRiskChallengeScore: z.number().min(0).max(100),
+  dropId: z.string().optional(),
 });
 
 router.post('/security', disallowReadOnly, (req: Request, res: Response) => {
@@ -672,8 +720,37 @@ router.post('/security', disallowReadOnly, (req: Request, res: Response) => {
   }
 
   const updated = applySecurityConfig(parseResult.data);
+  const dropId = parseResult.data.dropId || (req.query.dropId as string);
+
+  // Sync to drops so entries actually use the configured rules
+  const dropsToSync = dropId ? [dropId] : db.list('drops').map(d => d.id);
+  for (const dId of dropsToSync) {
+    const dropDoc = db.get('drops', dId);
+    if (dropDoc) {
+      const dropData = dropDoc.data as Drop;
+      db.set('drops', dId, {
+        ...dropData,
+        defenceConfig: {
+          ...dropData.defenceConfig,
+          turnstileEnabled: updated.turnstileEnabled,
+          powEnabled: updated.powEnabled,
+          powDifficulty: updated.powDifficulty,
+          honeypotEnabled: updated.honeypotEnabled,
+          rateLimitPerIp: updated.ipMaxRequests,
+          rateLimitPerAccount: updated.accountMaxRequests,
+          rateLimitPerDevice: updated.deviceMaxRequests,
+          timingJitterCheck: true,
+          riskScoringEnabled: true,
+          minRiskBlockScore: updated.minRiskBlockScore,
+          minRiskChallengeScore: updated.minRiskChallengeScore,
+        },
+      });
+    }
+  }
+
   appendAuditRecord('SECURITY_CONFIG_UPDATED', getActor(req), {
     config: updated,
+    dropId: dropId || 'all',
   });
 
   return res.json({ success: true, config: updated, message: 'Live rate limiters and security rules reconfigured.' });
@@ -683,9 +760,9 @@ router.post('/security', disallowReadOnly, (req: Request, res: Response) => {
 router.post('/security/blocklist', disallowReadOnly, (req: Request, res: Response) => {
   const { action, item, items, reason } = req.body;
 
-  if (!reason || typeof reason !== 'string' || reason.trim().length < 3) {
-    return res.status(400).json({ error: 'A reason (min 3 chars) is required for blocklist changes.' });
-  }
+  const effectiveReason = (reason && typeof reason === 'string' && reason.trim().length >= 3)
+    ? reason.trim()
+    : `Manual ${action || 'blocklist'} action by security operator`;
 
   if (action === 'add' && item) {
     activeBlocklist.add(item.trim());
@@ -708,7 +785,7 @@ router.post('/security/blocklist', disallowReadOnly, (req: Request, res: Respons
     action,
     item,
     itemCount: items ? items.length : 1,
-    reason: reason.trim(),
+    reason: effectiveReason,
     totalBlockedNow: activeBlocklist.size,
   });
 
@@ -774,7 +851,7 @@ router.post('/audit/verify', (req: Request, res: Response) => {
 
 // POST /api/admin/audit/invariants/:dropId - Run real invariant checks
 router.post('/audit/invariants/:dropId', (req: Request, res: Response) => {
-  const { dropId } = req.params;
+  const dropId = req.params.dropId as string;
   const result = runSystemInvariantCheck(dropId);
   return res.json({
     ...result,
@@ -820,7 +897,7 @@ router.get('/appeals', (req: Request, res: Response) => {
 
 // POST /api/admin/appeals/:id/decide
 router.post('/appeals/:id/decide', disallowReadOnly, (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const { decision, reviewNote } = req.body;
 
   if (!['approved', 'rejected'].includes(decision)) {

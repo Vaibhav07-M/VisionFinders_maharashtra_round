@@ -85,6 +85,15 @@ export interface DefenceConfig {
   minRiskChallengeScore: number; // 0-100 threshold
 }
 
+export interface SecurityConfig {
+  ipPoints: number;
+  ipDuration: number;
+  accountPoints: number;
+  accountDuration: number;
+  blocklist: string[];
+  timingJitterMs: number;
+}
+
 export interface Drop {
   id: string;
   name: string;
@@ -277,6 +286,11 @@ export interface Appeal {
   decidedBy?: string;
   decidedAt?: string;
   decisionNotes?: string;
+  notes?: string;
+  identityKey?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
 }
 
 // ==========================================

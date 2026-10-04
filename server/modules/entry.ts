@@ -13,7 +13,7 @@ export function registerEntryListener(cb: (dropId: string, stats: any) => void) 
 
 // GET /api/drops/:id/entries/me
 export function getUserEntryHandler(req: AuthenticatedRequest, res: Response) {
-  const { id: dropId } = req.params;
+  const dropId = req.params.id as string;
   const uid = req.user?.uid || 'user_alex_77';
   const email = req.user?.email || 'alex.chen@fairdrop.io';
   const identityKey = sha256Sync(email);
@@ -37,7 +37,7 @@ export function getUserEntryHandler(req: AuthenticatedRequest, res: Response) {
 
 // POST /api/drops/:id/join
 export async function joinDropHandler(req: AuthenticatedRequest, res: Response) {
-  const { id: dropId } = req.params;
+  const dropId = req.params.id as string;
   const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
   const clientDeviceId = (req.headers['x-device-id'] as string) || 'device_default';
   const userUid = req.user?.uid || 'user_guest';
@@ -240,7 +240,7 @@ export async function joinDropHandler(req: AuthenticatedRequest, res: Response) 
 
 // PUT /api/drops/:id/preferences (Edit preferences while window is open)
 export function updatePreferencesHandler(req: AuthenticatedRequest, res: Response) {
-  const { id: dropId } = req.params;
+  const dropId = req.params.id as string;
   const uid = req.user?.uid || 'user_guest';
   const email = req.user?.email || uid;
   const identityKey = sha256Sync(email);

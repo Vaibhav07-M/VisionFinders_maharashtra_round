@@ -276,6 +276,7 @@ export class MemoryFirestore {
       enabled: this.cloudEnabled,
       projectId: this.cloudProjectId,
       connectionStatus: this.cloudEnabled ? 'Connected (Online Cloud Firestore)' : 'Local File Persistence Mode',
+      mode: this.cloudEnabled ? 'cloud-connected' : 'local-ready',
     };
   }
 

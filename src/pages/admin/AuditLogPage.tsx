@@ -97,7 +97,13 @@ export const AuditLogPage: React.FC = () => {
   }, [page, pageSize, actionFilter, actorFilter, dateFrom, dateTo]);
 
   useEffect(() => {
-    fetchAuditLogs();
+    let mounted = true;
+    (async () => {
+      if (mounted) await fetchAuditLogs();
+    })();
+    return () => {
+      mounted = false;
+    };
   }, [fetchAuditLogs]);
 
   // Run real hash chain verification
@@ -293,7 +299,7 @@ export const AuditLogPage: React.FC = () => {
                   <span>Holds: {invariantResult.orphanedHolds}</span>
                 </div>
                 <span className="text-[10px] opacity-60 font-mono block">
-                  Audited: {invariantResult.totalSeats} seats at {new Date(invariantResult.checkedAt || Date.now()).toLocaleTimeString()}
+                  Audited: {invariantResult.totalSeats} seats at {invariantResult.checkedAt ? new Date(invariantResult.checkedAt).toLocaleTimeString() : 'recent'}
                 </span>
               </div>
             </div>

@@ -59,7 +59,6 @@ import { db } from './db/firestore';
 import { runSeed } from './seed';
 import adminRouter from './routes/admin';
 import { adminMetrics } from './modules/adminMetrics';
-import { defenceEventsMiddleware } from './modules/defenceEvents';
 
 dotenv.config();
 

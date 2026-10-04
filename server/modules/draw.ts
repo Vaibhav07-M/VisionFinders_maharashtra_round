@@ -36,7 +36,7 @@ export function executeFisherYates<T>(items: T[], seed: string): T[] {
 }
 
 export async function triggerDrawHandler(req: AuthenticatedRequest, res: Response) {
-  const { id: dropId } = req.params;
+  const dropId = req.params.id as string;
   const dropDoc = db.get('drops', dropId);
   if (!dropDoc) {
     return res.status(404).json({ error: 'Drop not found' });

@@ -75,7 +75,8 @@ router.get('/runs', (req: Request, res: Response) => {
 
 // GET /api/lab/runs/:runId (Get real-time live progress)
 router.get('/runs/:runId', (req: Request, res: Response) => {
-  const progress = getRunProgress(req.params.runId);
+  const runId = req.params.runId as string;
+  const progress = getRunProgress(runId);
   if (!progress) {
     return res.status(404).json({ error: 'RUN_NOT_FOUND', message: 'Simulation run not found.' });
   }
@@ -84,13 +85,15 @@ router.get('/runs/:runId', (req: Request, res: Response) => {
 
 // POST /api/lab/runs/:runId/stop (Abort within 2 seconds)
 router.post('/runs/:runId/stop', (req: Request, res: Response) => {
-  const stopped = stopLabRun(req.params.runId);
+  const runId = req.params.runId as string;
+  const stopped = stopLabRun(runId);
   return res.json({ success: stopped, message: stopped ? 'Attack run aborted.' : 'Run was not active.' });
 });
 
 // GET /api/lab/runs/:runId/report (Get measured report)
 router.get('/runs/:runId/report', (req: Request, res: Response) => {
-  const report = getReportForRun(req.params.runId);
+  const runId = req.params.runId as string;
+  const report = getReportForRun(runId);
   if (!report) {
     return res.status(404).json({ error: 'REPORT_NOT_FOUND', message: 'Report not available.' });
   }
@@ -99,7 +102,8 @@ router.get('/runs/:runId/report', (req: Request, res: Response) => {
 
 // POST /api/lab/runs/:runId/purge (Purge synthetic data & delete sandbox clone)
 router.post('/runs/:runId/purge', (req: Request, res: Response) => {
-  const result = purgeLabRun(req.params.runId);
+  const runId = req.params.runId as string;
+  const result = purgeLabRun(runId);
   return res.json({ success: true, ...result, message: 'Simulation data purged cleanly.' });
 });
 

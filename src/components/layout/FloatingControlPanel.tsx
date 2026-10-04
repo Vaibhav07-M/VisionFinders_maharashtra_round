@@ -27,7 +27,6 @@ export const FloatingControlPanel: React.FC = () => {
   } = useApp();
 
   const isDevMode = localStorage.getItem('DEV_MODE') === 'true' || (window as any).__DEV_MODE__ === true;
-  if (!isDevMode) return null;
 
   const activePersona = DEMO_PERSONAS[currentPersonaKey] || DEMO_PERSONAS.attendee;
 
@@ -68,6 +67,8 @@ export const FloatingControlPanel: React.FC = () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen]);
+
+  if (!isDevMode) return null;
 
   return (
     <div

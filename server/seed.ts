@@ -97,9 +97,11 @@ export function runSeed() {
       const row = String.fromCharCode(65 + Math.floor(((i - 1) % 125) / 25));
       const seatNum = ((i - 1) % 25) + 1;
       const seatId = `seat-${i}`;
+      const tierId = i <= 20 ? 'vip' : i <= 80 ? 'platinum' : i <= 180 ? 'gold' : i <= 330 ? 'silver' : 'bronze';
       const seat: Seat = {
         id: seatId,
         dropId: drop.id,
+        tierId,
         section,
         row,
         number: seatNum,

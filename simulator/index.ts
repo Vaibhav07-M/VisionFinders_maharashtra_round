@@ -64,11 +64,12 @@ export class SimulatorEngine {
 
   // Execute assault against target event
   public async executeAssault(
-    scenario: LabScenarioConfig,
+    scenario: LabScenarioConfig | any,
     options: {
       onProgress?: (p: any) => void;
       abortSignal?: AbortSignal;
-    } = {}
+    } | any = {},
+    ..._extraArgs: any[]
   ): Promise<{
     serverDown: boolean;
     runId: string;
@@ -439,3 +440,5 @@ if (import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
     process.exit(0);
   });
 }
+
+export { SimulatorEngine as RealLoadSimulator };

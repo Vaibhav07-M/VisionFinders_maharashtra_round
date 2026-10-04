@@ -51,7 +51,7 @@ export function createAppealHandler(req: AuthenticatedRequest, res: Response) {
 
 // POST /api/appeals/:id/decide
 export function decideAppealHandler(req: AuthenticatedRequest, res: Response) {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const { status, notes } = req.body;
 
   if (status !== 'approved' && status !== 'rejected') {
